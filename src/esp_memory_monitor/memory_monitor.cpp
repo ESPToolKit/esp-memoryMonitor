@@ -3,6 +3,10 @@
 #include <algorithm>
 #include <utility>
 
+#if __has_include(<esp_idf_version.h>)
+#include <esp_idf_version.h>
+#endif
+
 ESPMemoryMonitor* ESPMemoryMonitor::_allocInstance = nullptr;
 
 namespace {
@@ -326,36 +330,45 @@ void ESPMemoryMonitor::handleAllocEvent(size_t requestedBytes, uint32_t caps, co
 }
 
 bool ESPMemoryMonitor::registerFailedAllocCallback() {
-    using CallbackType = std::remove_pointer_t<heap_caps_failed_alloc_callback_t>;
+    // ESP-IDF 5.2+ adds a failed-allocation callback that accepts a user arg;
+    // earlier releases only support a global hook without unregister support.
+#ifdef ESP_IDF_VERSION
+    constexpr bool kHasCallbackArg = ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 2, 0);
+#else
+    constexpr bool kHasCallbackArg = false;
+#endif
 
-    if constexpr (std::is_invocable_v<CallbackType, size_t, uint32_t, const char*, void*>) {
+    if constexpr (kHasCallbackArg) {
         heap_caps_register_failed_alloc_callback(&ESPMemoryMonitor::failedAllocThunk4, this);
         _allocHookType = AllocHookType::WithArg;
         return true;
-    } else if constexpr (std::is_invocable_v<CallbackType, size_t, uint32_t, const char*>) {
-        _allocInstance = this;
-        heap_caps_register_failed_alloc_callback(&ESPMemoryMonitor::failedAllocThunk3, nullptr);
-        _allocHookType = AllocHookType::NoArg;
-        return true;
     }
-    return false;
+
+    _allocInstance = this;
+    heap_caps_register_failed_alloc_callback(&ESPMemoryMonitor::failedAllocThunk3);
+    _allocHookType = AllocHookType::NoArg;
+    return true;
 }
 
 void ESPMemoryMonitor::unregisterFailedAllocCallback() {
-    switch (_allocHookType) {
-        case AllocHookType::WithArg:
+#ifdef ESP_IDF_VERSION
+    constexpr bool kHasUnregister = ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 2, 0);
+#else
+    constexpr bool kHasUnregister = false;
+#endif
+
+    if (_allocHookType == AllocHookType::WithArg) {
+        if constexpr (kHasUnregister) {
             heap_caps_unregister_failed_alloc_callback(&ESPMemoryMonitor::failedAllocThunk4, this);
-            break;
-        case AllocHookType::NoArg:
-            if (_allocInstance == this) {
-                heap_caps_unregister_failed_alloc_callback(&ESPMemoryMonitor::failedAllocThunk3, nullptr);
-                _allocInstance = nullptr;
-            }
-            break;
-        case AllocHookType::None:
-        default:
-            break;
+        }
+    } else if (_allocHookType == AllocHookType::NoArg) {
+        if (_allocInstance == this) {
+            _allocInstance = nullptr;
+            // Older API has no unregister; replace with nullptr to detach.
+            heap_caps_register_failed_alloc_callback(nullptr);
+        }
     }
+
     _allocHookType = AllocHookType::None;
 }
 
