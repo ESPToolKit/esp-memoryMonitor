@@ -3,21 +3,27 @@
 #include <algorithm>
 #include <utility>
 
-#if __has_include(<esp_idf_version.h>)
-#include <esp_idf_version.h>
-#endif
-
-#if defined(ESP_IDF_VERSION_MAJOR) && defined(ESP_IDF_VERSION_MINOR)
-#define ESPMM_IDF_AT_LEAST(major, minor) \
-    ((ESP_IDF_VERSION_MAJOR > (major)) || (ESP_IDF_VERSION_MAJOR == (major) && ESP_IDF_VERSION_MINOR >= (minor)))
-#else
-#define ESPMM_IDF_AT_LEAST(major, minor) 0
-#endif
-
 ESPMemoryMonitor* ESPMemoryMonitor::_allocInstance = nullptr;
 
 namespace {
 constexpr const char* kSamplerTaskName = "ESPMemoryMon";
+
+using RegisterFailedAllocCallbackFn = decltype(&heap_caps_register_failed_alloc_callback);
+
+constexpr bool kRegisterSupportsArg =
+    std::is_invocable_r_v<esp_err_t, RegisterFailedAllocCallbackFn, esp_alloc_failed_hook_t, void*>;
+constexpr bool kRegisterSupportsNoArg =
+    std::is_invocable_r_v<esp_err_t, RegisterFailedAllocCallbackFn, esp_alloc_failed_hook_t>;
+
+constexpr bool kAllocHookTakesArg =
+    std::is_invocable_v<esp_alloc_failed_hook_t, size_t, uint32_t, const char*, void*>;
+constexpr bool kAllocHookTakesNoArg =
+    std::is_invocable_v<esp_alloc_failed_hook_t, size_t, uint32_t, const char*>;
+
+constexpr bool kCanUseThunk4 = kAllocHookTakesArg && kRegisterSupportsArg;
+constexpr bool kCanUseThunk3 = kAllocHookTakesNoArg && (kRegisterSupportsArg || kRegisterSupportsNoArg);
+
+static_assert(kCanUseThunk4 || kCanUseThunk3, "Unsupported failed alloc callback signature");
 
 inline TickType_t delayTicks(uint32_t intervalMs) {
     const TickType_t ticks = pdMS_TO_TICKS(intervalMs);
@@ -337,34 +343,41 @@ void ESPMemoryMonitor::handleAllocEvent(size_t requestedBytes, uint32_t caps, co
 }
 
 bool ESPMemoryMonitor::registerFailedAllocCallback() {
-    // ESP-IDF 5.2+ adds a failed-allocation callback that accepts a user arg;
-    // earlier releases only support a global hook without unregister support.
-    constexpr bool kHasCallbackArg = ESPMM_IDF_AT_LEAST(5, 2);
-
-    if constexpr (kHasCallbackArg) {
+    if constexpr (kCanUseThunk4) {
         heap_caps_register_failed_alloc_callback(&ESPMemoryMonitor::failedAllocThunk4, this);
         _allocHookType = AllocHookType::WithArg;
         return true;
-    }
+    } else if constexpr (kCanUseThunk3) {
+        _allocInstance = this;
 
-    _allocInstance = this;
-    heap_caps_register_failed_alloc_callback(&ESPMemoryMonitor::failedAllocThunk3);
-    _allocHookType = AllocHookType::NoArg;
-    return true;
+        if constexpr (kRegisterSupportsArg) {
+            heap_caps_register_failed_alloc_callback(&ESPMemoryMonitor::failedAllocThunk3, this);
+        } else {
+            heap_caps_register_failed_alloc_callback(&ESPMemoryMonitor::failedAllocThunk3);
+        }
+
+        _allocHookType = AllocHookType::NoArg;
+        return true;
+    } else {
+        return false;
+    }
 }
 
 void ESPMemoryMonitor::unregisterFailedAllocCallback() {
-    constexpr bool kHasUnregister = ESPMM_IDF_AT_LEAST(5, 2);
-
     if (_allocHookType == AllocHookType::WithArg) {
-        if constexpr (kHasUnregister) {
-            heap_caps_unregister_failed_alloc_callback(&ESPMemoryMonitor::failedAllocThunk4, this);
+        if constexpr (kRegisterSupportsArg) {
+            // Newer IDF builds may support unregister, but registering nullptr disconnects too.
+            heap_caps_register_failed_alloc_callback(nullptr, nullptr);
         }
     } else if (_allocHookType == AllocHookType::NoArg) {
         if (_allocInstance == this) {
             _allocInstance = nullptr;
-            // Older API has no unregister; replace with nullptr to detach.
-            heap_caps_register_failed_alloc_callback(nullptr);
+
+            if constexpr (kRegisterSupportsNoArg) {
+                heap_caps_register_failed_alloc_callback(nullptr);
+            } else if constexpr (kRegisterSupportsArg) {
+                heap_caps_register_failed_alloc_callback(nullptr, nullptr);
+            }
         }
     }
 
