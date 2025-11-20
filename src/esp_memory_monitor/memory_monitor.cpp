@@ -7,6 +7,13 @@
 #include <esp_idf_version.h>
 #endif
 
+#if defined(ESP_IDF_VERSION_MAJOR) && defined(ESP_IDF_VERSION_MINOR)
+#define ESPMM_IDF_AT_LEAST(major, minor) \
+    ((ESP_IDF_VERSION_MAJOR > (major)) || (ESP_IDF_VERSION_MAJOR == (major) && ESP_IDF_VERSION_MINOR >= (minor)))
+#else
+#define ESPMM_IDF_AT_LEAST(major, minor) 0
+#endif
+
 ESPMemoryMonitor* ESPMemoryMonitor::_allocInstance = nullptr;
 
 namespace {
@@ -332,11 +339,7 @@ void ESPMemoryMonitor::handleAllocEvent(size_t requestedBytes, uint32_t caps, co
 bool ESPMemoryMonitor::registerFailedAllocCallback() {
     // ESP-IDF 5.2+ adds a failed-allocation callback that accepts a user arg;
     // earlier releases only support a global hook without unregister support.
-#ifdef ESP_IDF_VERSION
-    constexpr bool kHasCallbackArg = ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 2, 0);
-#else
-    constexpr bool kHasCallbackArg = false;
-#endif
+    constexpr bool kHasCallbackArg = ESPMM_IDF_AT_LEAST(5, 2);
 
     if constexpr (kHasCallbackArg) {
         heap_caps_register_failed_alloc_callback(&ESPMemoryMonitor::failedAllocThunk4, this);
@@ -351,11 +354,7 @@ bool ESPMemoryMonitor::registerFailedAllocCallback() {
 }
 
 void ESPMemoryMonitor::unregisterFailedAllocCallback() {
-#ifdef ESP_IDF_VERSION
-    constexpr bool kHasUnregister = ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 2, 0);
-#else
-    constexpr bool kHasUnregister = false;
-#endif
+    constexpr bool kHasUnregister = ESPMM_IDF_AT_LEAST(5, 2);
 
     if (_allocHookType == AllocHookType::WithArg) {
         if constexpr (kHasUnregister) {
