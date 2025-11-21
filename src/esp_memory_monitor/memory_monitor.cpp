@@ -6,7 +6,6 @@
 
 namespace {
 constexpr const char* kSamplerTaskName = "ESPMemoryMon";
-ESPMemoryMonitor* ESPMemoryMonitor::_failedAllocInstance = nullptr;
 
 inline TickType_t delayTicks(uint32_t intervalMs) {
     const TickType_t ticks = pdMS_TO_TICKS(intervalMs);
@@ -17,6 +16,8 @@ inline size_t regionIndex(MemoryRegion region) {
     return region == MemoryRegion::Psram ? 1 : 0;
 }
 }  // namespace
+
+ESPMemoryMonitor* ESPMemoryMonitor::_failedAllocInstance = nullptr;
 
 ESPMemoryMonitor::~ESPMemoryMonitor() {
     deinit();
