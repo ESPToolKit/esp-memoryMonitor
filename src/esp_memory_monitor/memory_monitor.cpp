@@ -9,14 +9,26 @@ ESPMemoryMonitor* ESPMemoryMonitor::_allocInstance = nullptr;
 namespace {
 constexpr const char* kSamplerTaskName = "ESPMemoryMon";
 
-using RegisterFn = decltype(&heap_caps_register_failed_alloc_callback);
+template <typename T>
+struct FunctionPointerTraits;
 
-constexpr bool kRegisterSupportsArg = std::is_invocable_v<RegisterFn, esp_alloc_failed_hook_t, void*>;
-constexpr bool kRegisterSupportsNoArg = std::is_invocable_v<RegisterFn, esp_alloc_failed_hook_t>;
-constexpr bool kAllocHookTakesArg =
-    std::is_invocable_r_v<void, esp_alloc_failed_hook_t, size_t, uint32_t, const char*, void*>;
-constexpr bool kAllocHookTakesNoArg =
-    std::is_invocable_r_v<void, esp_alloc_failed_hook_t, size_t, uint32_t, const char*>;
+template <typename R, typename... Args>
+struct FunctionPointerTraits<R (*)(Args...)> {
+    static constexpr size_t kArity = sizeof...(Args);
+};
+
+using RegisterFn = decltype(&heap_caps_register_failed_alloc_callback);
+using RegisterTraits = FunctionPointerTraits<RegisterFn>;
+using HookTraits = FunctionPointerTraits<esp_alloc_failed_hook_t>;
+
+constexpr bool kRegisterSupportsArg = RegisterTraits::kArity == 2;
+constexpr bool kRegisterSupportsNoArg = RegisterTraits::kArity == 1;
+constexpr bool kAllocHookTakesArg = HookTraits::kArity == 4;
+constexpr bool kAllocHookTakesNoArg = HookTraits::kArity == 3;
+
+static_assert(kRegisterSupportsArg || kRegisterSupportsNoArg,
+              "Unsupported heap_caps_register_failed_alloc_callback signature");
+static_assert(kAllocHookTakesArg || kAllocHookTakesNoArg, "Unsupported failed alloc hook signature");
 
 constexpr bool kCanUseThunk4 = kAllocHookTakesArg && kRegisterSupportsArg;
 constexpr bool kCanUseThunk3 = kAllocHookTakesNoArg && (kRegisterSupportsArg || kRegisterSupportsNoArg);
