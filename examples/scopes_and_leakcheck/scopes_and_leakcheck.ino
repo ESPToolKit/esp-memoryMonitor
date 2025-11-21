@@ -1,5 +1,13 @@
 #include <Arduino.h>
+#if defined(__has_include)
+#if __has_include(<ArduinoJson.h>)
 #include <ArduinoJson.h>
+#define ESPMM_EXAMPLE_HAS_JSON 1
+#endif
+#endif
+#ifndef ESPMM_EXAMPLE_HAS_JSON
+#define ESPMM_EXAMPLE_HAS_JSON 0
+#endif
 #include <ESPMemoryMonitor.h>
 #include <esp_log.h>
 
@@ -85,7 +93,7 @@ static void simulateOtaChunk() {
 }
 
 static void exportSnapshotJson() {
-#if ESPMM_HAS_ARDUINOJSON
+#if ESPMM_HAS_ARDUINOJSON && ESPMM_EXAMPLE_HAS_JSON
     StaticJsonDocument<2048> doc;
     const MemorySnapshot snap = monitor.sampleNow();
     toJson(snap, doc);
