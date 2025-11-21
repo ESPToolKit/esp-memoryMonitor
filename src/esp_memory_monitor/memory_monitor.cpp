@@ -15,12 +15,38 @@ using HookFn = esp_alloc_failed_hook_t;
 using HookWithArgFn = void (*)(size_t, uint32_t, const char*, void*);
 using HookNoArgFn = void (*)(size_t, uint32_t, const char*);
 
-constexpr bool kRegisterAcceptsHook4WithCtx =
-    std::is_invocable_r_v<esp_err_t, RegisterFn, HookWithArgFn, void*>;
-constexpr bool kRegisterAcceptsHook4NoCtx = std::is_invocable_r_v<esp_err_t, RegisterFn, HookWithArgFn>;
-constexpr bool kRegisterAcceptsHook3WithCtx =
-    std::is_invocable_r_v<esp_err_t, RegisterFn, HookNoArgFn, void*>;
-constexpr bool kRegisterAcceptsHook3NoCtx = std::is_invocable_r_v<esp_err_t, RegisterFn, HookNoArgFn>;
+template <typename Hook, typename = void>
+struct RegisterAcceptsHook4WithCtx : std::false_type {};
+template <typename Hook>
+struct RegisterAcceptsHook4WithCtx<Hook,
+                                   std::void_t<decltype(heap_caps_register_failed_alloc_callback(std::declval<Hook>(),
+                                                                                                 std::declval<void*>()))>>
+    : std::true_type {};
+
+template <typename Hook, typename = void>
+struct RegisterAcceptsHook4NoCtx : std::false_type {};
+template <typename Hook>
+struct RegisterAcceptsHook4NoCtx<Hook, std::void_t<decltype(heap_caps_register_failed_alloc_callback(std::declval<Hook>()))>>
+    : std::true_type {};
+
+template <typename Hook, typename = void>
+struct RegisterAcceptsHook3WithCtx : std::false_type {};
+template <typename Hook>
+struct RegisterAcceptsHook3WithCtx<Hook,
+                                   std::void_t<decltype(heap_caps_register_failed_alloc_callback(std::declval<Hook>(),
+                                                                                                 std::declval<void*>()))>>
+    : std::true_type {};
+
+template <typename Hook, typename = void>
+struct RegisterAcceptsHook3NoCtx : std::false_type {};
+template <typename Hook>
+struct RegisterAcceptsHook3NoCtx<Hook, std::void_t<decltype(heap_caps_register_failed_alloc_callback(std::declval<Hook>()))>>
+    : std::true_type {};
+
+constexpr bool kRegisterAcceptsHook4WithCtx = RegisterAcceptsHook4WithCtx<HookWithArgFn>::value;
+constexpr bool kRegisterAcceptsHook4NoCtx = RegisterAcceptsHook4NoCtx<HookWithArgFn>::value;
+constexpr bool kRegisterAcceptsHook3WithCtx = RegisterAcceptsHook3WithCtx<HookNoArgFn>::value;
+constexpr bool kRegisterAcceptsHook3NoCtx = RegisterAcceptsHook3NoCtx<HookNoArgFn>::value;
 
 constexpr bool kCanUseThunk4 = kRegisterAcceptsHook4WithCtx || kRegisterAcceptsHook4NoCtx;
 constexpr bool kCanUseThunk3 = kRegisterAcceptsHook3WithCtx || kRegisterAcceptsHook3NoCtx;
