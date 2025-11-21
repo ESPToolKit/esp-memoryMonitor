@@ -325,9 +325,10 @@ void ESPMemoryMonitor::handleAllocEvent(size_t requestedBytes, uint32_t caps, co
 }
 
 bool ESPMemoryMonitor::registerFailedAllocCallback() {
-    heap_caps_register_failed_alloc_callback([this](size_t requested_size, uint32_t caps, const char *function_name) {
+    esp_err_t err = heap_caps_register_failed_alloc_callback([this](size_t requested_size, uint32_t caps, const char *function_name) {
         handleAllocEvent(requested_size, caps, function_name);
     });
+    return err == ESP_OK;
 }
 
 void ESPMemoryMonitor::unregisterFailedAllocCallback() {
