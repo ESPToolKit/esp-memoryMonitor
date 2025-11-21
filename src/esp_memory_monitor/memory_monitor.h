@@ -1,7 +1,16 @@
 #pragma once
 
 #include <Arduino.h>
+#if defined(__has_include)
+#if __has_include(<ArduinoJson.h>)
 #include <ArduinoJson.h>
+#define ESPMM_HAS_ARDUINOJSON 1
+#endif
+#endif
+
+#ifndef ESPMM_HAS_ARDUINOJSON
+#define ESPMM_HAS_ARDUINOJSON 0
+#endif
 
 #include <array>
 #include <cstdint>
@@ -335,4 +344,6 @@ class ESPMemoryMonitor {
     bool _panicHookInstalled = false;
 };
 
+#if ESPMM_HAS_ARDUINOJSON
 void toJson(const MemorySnapshot& snap, JsonDocument& doc);
+#endif

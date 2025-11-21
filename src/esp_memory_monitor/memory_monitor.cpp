@@ -977,6 +977,7 @@ void panicShutdownHandler() {
 }
 }  // namespace
 
+#if ESPMM_HAS_ARDUINOJSON
 void toJson(const MemorySnapshot& snap, JsonDocument& doc) {
     JsonObject root = doc.to<JsonObject>();
     root["timestampUs"] = snap.timestampUs;
@@ -1009,3 +1010,4 @@ void toJson(const MemorySnapshot& snap, JsonDocument& doc) {
         obj["priority"] = static_cast<unsigned>(stack.priority);
     }
 }
+#endif

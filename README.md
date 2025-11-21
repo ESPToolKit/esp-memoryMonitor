@@ -126,7 +126,7 @@ When you need richer stack info or failed-allocation events, flip `enablePerTask
 - `LeakCheckResult markLeakCheckPoint(const std::string &label)` / `onLeakCheck(LeakCheckCallback cb)` – compare steady-state phases for leak suspicion.
 - `void onTaskStackThreshold(TaskStackThresholdCallback cb)` / `setTaskStackThreshold(const std::string&, TaskStackThreshold)` – task stack state transitions and lifecycle detection (`enablePerTaskStacks + enableTaskTracking`).
 - `bool installPanicHook(PanicCallback cb = {})` / `void uninstallPanicHook()` – capture a pre-abort snapshot via the shutdown hook.
-- `void toJson(const MemorySnapshot&, JsonDocument &doc)` – serialize a snapshot via ArduinoJson for HTTP/MQTT/telemetry (ArduinoJson is a declared dependency).
+- `void toJson(const MemorySnapshot&, JsonDocument &doc)` – serialize a snapshot via ArduinoJson for HTTP/MQTT/telemetry (enabled when ArduinoJson is available).
 
 `MemoryMonitorConfig` knobs:
 
