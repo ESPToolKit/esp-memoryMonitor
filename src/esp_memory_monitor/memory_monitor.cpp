@@ -12,29 +12,18 @@ constexpr const char* kSamplerTaskName = "ESPMemoryMon";
 using RegisterFn = decltype(&heap_caps_register_failed_alloc_callback);
 using HookFn = esp_alloc_failed_hook_t;
 
-template <typename T>
-struct FunctionPointerTraits;
+using HookWithArgFn = void (*)(size_t, uint32_t, const char*, void*);
+using HookNoArgFn = void (*)(size_t, uint32_t, const char*);
 
-template <typename R, typename... Args>
-struct FunctionPointerTraits<R (*)(Args...)> {
-    static constexpr size_t kArity = sizeof...(Args);
-};
+constexpr bool kRegisterAcceptsHook4WithCtx =
+    std::is_invocable_r_v<esp_err_t, RegisterFn, HookWithArgFn, void*>;
+constexpr bool kRegisterAcceptsHook4NoCtx = std::is_invocable_r_v<esp_err_t, RegisterFn, HookWithArgFn>;
+constexpr bool kRegisterAcceptsHook3WithCtx =
+    std::is_invocable_r_v<esp_err_t, RegisterFn, HookNoArgFn, void*>;
+constexpr bool kRegisterAcceptsHook3NoCtx = std::is_invocable_r_v<esp_err_t, RegisterFn, HookNoArgFn>;
 
-using RegisterTraits = FunctionPointerTraits<RegisterFn>;
-using HookTraits = FunctionPointerTraits<HookFn>;
-
-constexpr bool kRegisterSupportsArg = RegisterTraits::kArity == 2;
-constexpr bool kRegisterSupportsNoArg = RegisterTraits::kArity == 1;
-
-constexpr bool kHookTakesArg = HookTraits::kArity == 4;
-constexpr bool kHookTakesNoArg = HookTraits::kArity == 3;
-
-static_assert(kRegisterSupportsArg || kRegisterSupportsNoArg,
-              "Unsupported heap_caps_register_failed_alloc_callback signature");
-static_assert(kHookTakesArg || kHookTakesNoArg, "Unsupported failed alloc hook signature");
-
-constexpr bool kCanUseThunk4 = kHookTakesArg && kRegisterSupportsArg;
-constexpr bool kCanUseThunk3 = kHookTakesNoArg && (kRegisterSupportsArg || kRegisterSupportsNoArg);
+constexpr bool kCanUseThunk4 = kRegisterAcceptsHook4WithCtx || kRegisterAcceptsHook4NoCtx;
+constexpr bool kCanUseThunk3 = kRegisterAcceptsHook3WithCtx || kRegisterAcceptsHook3NoCtx;
 
 static_assert(kCanUseThunk4 || kCanUseThunk3, "Unsupported failed alloc callback signature");
 
@@ -357,13 +346,17 @@ void ESPMemoryMonitor::handleAllocEvent(size_t requestedBytes, uint32_t caps, co
 
 bool ESPMemoryMonitor::registerFailedAllocCallback() {
     if constexpr (kCanUseThunk4) {
-        heap_caps_register_failed_alloc_callback(&ESPMemoryMonitor::failedAllocThunk4, this);
+        if constexpr (kRegisterAcceptsHook4WithCtx) {
+            heap_caps_register_failed_alloc_callback(&ESPMemoryMonitor::failedAllocThunk4, this);
+        } else {
+            heap_caps_register_failed_alloc_callback(&ESPMemoryMonitor::failedAllocThunk4);
+        }
         _allocHookType = AllocHookType::WithArg;
         return true;
     } else if constexpr (kCanUseThunk3) {
         _allocInstance = this;
 
-        if constexpr (kRegisterSupportsArg) {
+        if constexpr (kRegisterAcceptsHook3WithCtx) {
             heap_caps_register_failed_alloc_callback(&ESPMemoryMonitor::failedAllocThunk3, this);
         } else {
             heap_caps_register_failed_alloc_callback(&ESPMemoryMonitor::failedAllocThunk3);
@@ -378,17 +371,19 @@ bool ESPMemoryMonitor::registerFailedAllocCallback() {
 
 void ESPMemoryMonitor::unregisterFailedAllocCallback() {
     if (_allocHookType == AllocHookType::WithArg) {
-        if constexpr (kRegisterSupportsArg) {
+        if constexpr (kRegisterAcceptsHook4WithCtx) {
             // Newer IDF builds may support unregister, but registering nullptr disconnects too.
             heap_caps_register_failed_alloc_callback(nullptr, nullptr);
+        } else if constexpr (kRegisterAcceptsHook4NoCtx) {
+            heap_caps_register_failed_alloc_callback(nullptr);
         }
     } else if (_allocHookType == AllocHookType::NoArg) {
         if (_allocInstance == this) {
             _allocInstance = nullptr;
 
-            if constexpr (kRegisterSupportsNoArg) {
+            if constexpr (kRegisterAcceptsHook3NoCtx) {
                 heap_caps_register_failed_alloc_callback(nullptr);
-            } else if constexpr (kRegisterSupportsArg) {
+            } else if constexpr (kRegisterAcceptsHook3WithCtx) {
                 heap_caps_register_failed_alloc_callback(nullptr, nullptr);
             }
         }
