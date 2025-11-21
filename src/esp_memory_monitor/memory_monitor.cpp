@@ -17,11 +17,13 @@ using RegisterNoArgFn = esp_err_t (*)(HookFn);
 using HookWithArgFn = void (*)(size_t, uint32_t, const char*, void*);
 using HookNoArgFn = void (*)(size_t, uint32_t, const char*);
 
-constexpr bool kRegisterSupportsArg = std::is_convertible_v<RegisterFn, RegisterWithArgFn>;
-constexpr bool kRegisterSupportsNoArg = std::is_convertible_v<RegisterFn, RegisterNoArgFn>;
+// Use exact signature matching so we don't mis-detect partial compatibility and
+// call the wrong overload on older IDF headers.
+constexpr bool kRegisterSupportsArg = std::is_same_v<RegisterFn, RegisterWithArgFn>;
+constexpr bool kRegisterSupportsNoArg = std::is_same_v<RegisterFn, RegisterNoArgFn>;
 
-constexpr bool kHookTakesArg = std::is_convertible_v<HookWithArgFn, HookFn>;
-constexpr bool kHookTakesNoArg = std::is_convertible_v<HookNoArgFn, HookFn>;
+constexpr bool kHookTakesArg = std::is_same_v<HookFn, HookWithArgFn>;
+constexpr bool kHookTakesNoArg = std::is_same_v<HookFn, HookNoArgFn>;
 
 static_assert(kRegisterSupportsArg || kRegisterSupportsNoArg,
               "Unsupported heap_caps_register_failed_alloc_callback signature");
