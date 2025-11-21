@@ -6,6 +6,7 @@
 
 namespace {
 constexpr const char* kSamplerTaskName = "ESPMemoryMon";
+ESPMemoryMonitor* ESPMemoryMonitor::_failedAllocInstance = nullptr;
 
 inline TickType_t delayTicks(uint32_t intervalMs) {
     const TickType_t ticks = pdMS_TO_TICKS(intervalMs);
@@ -324,14 +325,28 @@ void ESPMemoryMonitor::handleAllocEvent(size_t requestedBytes, uint32_t caps, co
     cb(event);
 }
 
+void ESPMemoryMonitor::allocFailedHook(size_t requestedBytes, uint32_t caps, const char* functionName) {
+    if (_failedAllocInstance != nullptr) {
+        _failedAllocInstance->handleAllocEvent(requestedBytes, caps, functionName);
+    }
+}
+
 bool ESPMemoryMonitor::registerFailedAllocCallback() {
-    esp_err_t err = heap_caps_register_failed_alloc_callback([this](size_t requested_size, uint32_t caps, const char *function_name) {
-        handleAllocEvent(requested_size, caps, function_name);
-    });
-    return err == ESP_OK;
+    // This monitor becomes the global instance receiving failed-alloc events
+    _failedAllocInstance = this;
+
+    esp_err_t err = heap_caps_register_failed_alloc_callback(&ESPMemoryMonitor::allocFailedHook);
+    if (err != ESP_OK) {
+        _failedAllocInstance = nullptr;
+        return false;
+    }
+    return true;
 }
 
 void ESPMemoryMonitor::unregisterFailedAllocCallback() {
     heap_caps_register_failed_alloc_callback(nullptr);
+    if (_failedAllocInstance == this) {
+        _failedAllocInstance = nullptr;
+    }
 }
 

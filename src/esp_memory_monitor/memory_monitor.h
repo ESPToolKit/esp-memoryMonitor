@@ -138,6 +138,9 @@ class ESPMemoryMonitor {
     static void samplerTaskThunk(void* arg);
     void samplerTaskLoop();
 
+    static void allocFailedHook(size_t requestedBytes, uint32_t caps, const char* functionName);
+    static ESPMemoryMonitor* _failedAllocInstance;
+    
     MemorySnapshot captureSnapshot() const;
     RegionStats captureRegion(uint32_t caps, MemoryRegion region) const;
     std::vector<TaskStackUsage> captureStacks() const;
