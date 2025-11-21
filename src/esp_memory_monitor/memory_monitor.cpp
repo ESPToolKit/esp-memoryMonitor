@@ -1,6 +1,7 @@
 #include "esp_memory_monitor/memory_monitor.h"
 
 #include <algorithm>
+#include <type_traits>
 #include <utility>
 
 ESPMemoryMonitor* ESPMemoryMonitor::_allocInstance = nullptr;
@@ -8,40 +9,14 @@ ESPMemoryMonitor* ESPMemoryMonitor::_allocInstance = nullptr;
 namespace {
 constexpr const char* kSamplerTaskName = "ESPMemoryMon";
 
-template <typename Hook, typename = void>
-struct RegisterSupportsArg : std::false_type {};
-template <typename Hook>
-struct RegisterSupportsArg<
-    Hook,
-    std::void_t<decltype(heap_caps_register_failed_alloc_callback(std::declval<Hook>(), std::declval<void*>()))>>
-    : std::true_type {};
+using RegisterFn = decltype(&heap_caps_register_failed_alloc_callback);
 
-template <typename Hook, typename = void>
-struct RegisterSupportsNoArg : std::false_type {};
-template <typename Hook>
-struct RegisterSupportsNoArg<Hook, std::void_t<decltype(heap_caps_register_failed_alloc_callback(std::declval<Hook>()))>>
-    : std::true_type {};
-
-template <typename Hook, typename = void>
-struct HookTakesArg : std::false_type {};
-template <typename Hook>
-struct HookTakesArg<Hook,
-                    std::void_t<decltype(std::declval<Hook>()(
-                        std::declval<size_t>(), std::declval<uint32_t>(), std::declval<const char*>(), std::declval<void*>()))>>
-    : std::true_type {};
-
-template <typename Hook, typename = void>
-struct HookTakesNoArg : std::false_type {};
-template <typename Hook>
-struct HookTakesNoArg<
-    Hook,
-    std::void_t<decltype(std::declval<Hook>()(std::declval<size_t>(), std::declval<uint32_t>(), std::declval<const char*>()))>>
-    : std::true_type {};
-
-constexpr bool kRegisterSupportsArg = RegisterSupportsArg<esp_alloc_failed_hook_t>::value;
-constexpr bool kRegisterSupportsNoArg = RegisterSupportsNoArg<esp_alloc_failed_hook_t>::value;
-constexpr bool kAllocHookTakesArg = HookTakesArg<esp_alloc_failed_hook_t>::value;
-constexpr bool kAllocHookTakesNoArg = HookTakesNoArg<esp_alloc_failed_hook_t>::value;
+constexpr bool kRegisterSupportsArg = std::is_invocable_v<RegisterFn, esp_alloc_failed_hook_t, void*>;
+constexpr bool kRegisterSupportsNoArg = std::is_invocable_v<RegisterFn, esp_alloc_failed_hook_t>;
+constexpr bool kAllocHookTakesArg =
+    std::is_invocable_r_v<void, esp_alloc_failed_hook_t, size_t, uint32_t, const char*, void*>;
+constexpr bool kAllocHookTakesNoArg =
+    std::is_invocable_r_v<void, esp_alloc_failed_hook_t, size_t, uint32_t, const char*>;
 
 constexpr bool kCanUseThunk4 = kAllocHookTakesArg && kRegisterSupportsArg;
 constexpr bool kCanUseThunk3 = kAllocHookTakesNoArg && (kRegisterSupportsArg || kRegisterSupportsNoArg);
