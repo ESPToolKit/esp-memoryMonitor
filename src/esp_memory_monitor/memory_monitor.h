@@ -230,6 +230,7 @@ class MemoryScope {
 
 class ESPMemoryMonitor {
   public:
+    friend class MemoryScope;
     ESPMemoryMonitor() = default;
     ~ESPMemoryMonitor();
 
@@ -313,6 +314,7 @@ class ESPMemoryMonitor {
     void trackTasksLocked(const MemorySnapshot& snapshot, std::vector<TaskStackEvent>& events);
     LeakCheckResult buildLeakCheckLocked(const std::string& label);
     void runPanicHook();
+    static void panicShutdownThunk();
 
     bool registerFailedAllocCallback();
     void unregisterFailedAllocCallback();

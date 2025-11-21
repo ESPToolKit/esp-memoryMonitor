@@ -25,8 +25,6 @@ inline size_t regionIndex(MemoryRegion region) {
 inline size_t saturatingSubtract(size_t value, size_t delta) {
     return value > delta ? value - delta : 0;
 }
-
-void panicShutdownHandler();
 }  // namespace
 
 static ESPMemoryMonitor* gPanicInstance = nullptr;
@@ -954,7 +952,7 @@ void ESPMemoryMonitor::runPanicHook() {
 
 bool ESPMemoryMonitor::registerPanicHandler() {
     gPanicInstance = this;
-    const esp_err_t err = esp_register_shutdown_handler(&panicShutdownHandler);
+    const esp_err_t err = esp_register_shutdown_handler(&ESPMemoryMonitor::panicShutdownThunk);
     if (err != ESP_OK) {
         gPanicInstance = nullptr;
         return false;
@@ -963,19 +961,17 @@ bool ESPMemoryMonitor::registerPanicHandler() {
 }
 
 void ESPMemoryMonitor::unregisterPanicHandler() {
-    esp_unregister_shutdown_handler(&panicShutdownHandler);
+    esp_unregister_shutdown_handler(&ESPMemoryMonitor::panicShutdownThunk);
     if (gPanicInstance == this) {
         gPanicInstance = nullptr;
     }
 }
 
-namespace {
-void panicShutdownHandler() {
+void ESPMemoryMonitor::panicShutdownThunk() {
     if (gPanicInstance != nullptr) {
         gPanicInstance->runPanicHook();
     }
 }
-}  // namespace
 
 #if ESPMM_HAS_ARDUINOJSON
 void toJson(const MemorySnapshot& snap, JsonDocument& doc) {
