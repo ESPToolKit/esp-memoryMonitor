@@ -149,8 +149,6 @@ class ESPMemoryMonitor {
 
     bool registerFailedAllocCallback();
     void unregisterFailedAllocCallback();
-    static void failedAllocThunk3(size_t size, uint32_t caps, const char* functionName);
-    static void failedAllocThunk4(size_t size, uint32_t caps, const char* functionName, void* arg);
 
     MemoryMonitorConfig _config{};
     bool _initialized = false;
@@ -162,7 +160,4 @@ class ESPMemoryMonitor {
     SampleCallback _sampleCallback;
     ThresholdCallback _thresholdCallback;
     FailedAllocCallback _allocCallback;
-    AllocHookType _allocHookType = AllocHookType::None;
-
-    static ESPMemoryMonitor* _allocInstance;
 };

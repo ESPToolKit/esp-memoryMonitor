@@ -4,35 +4,8 @@
 #include <type_traits>
 #include <utility>
 
-ESPMemoryMonitor* ESPMemoryMonitor::_allocInstance = nullptr;
-
 namespace {
 constexpr const char* kSamplerTaskName = "ESPMemoryMon";
-
-using RegisterFn = decltype(&heap_caps_register_failed_alloc_callback);
-using HookFn = esp_alloc_failed_hook_t;
-
-template <typename T>
-struct FunctionPointerTraits;
-
-template <typename R, typename... Args>
-struct FunctionPointerTraits<R (*)(Args...)> {
-    static constexpr size_t kArity = sizeof...(Args);
-};
-
-using RegisterTraits = FunctionPointerTraits<RegisterFn>;
-using HookTraits = FunctionPointerTraits<HookFn>;
-
-constexpr bool kRegisterAcceptsContext = RegisterTraits::kArity == 2;
-constexpr bool kHookHasContextArg = HookTraits::kArity == 4;
-constexpr bool kHookHasNoContextArg = HookTraits::kArity == 3;
-
-static_assert(kRegisterAcceptsContext || RegisterTraits::kArity == 1,
-              "Unsupported heap_caps_register_failed_alloc_callback signature");
-static_assert(kHookHasContextArg || kHookHasNoContextArg, "Unsupported failed alloc hook signature");
-
-constexpr bool kCanUseThunk4 = kRegisterAcceptsContext && kHookHasContextArg;
-constexpr bool kCanUseThunk3 = kHookHasNoContextArg;
 
 inline TickType_t delayTicks(uint32_t intervalMs) {
     const TickType_t ticks = pdMS_TO_TICKS(intervalMs);
@@ -352,59 +325,12 @@ void ESPMemoryMonitor::handleAllocEvent(size_t requestedBytes, uint32_t caps, co
 }
 
 bool ESPMemoryMonitor::registerFailedAllocCallback() {
-    if constexpr (kCanUseThunk4) {
-        heap_caps_register_failed_alloc_callback(&ESPMemoryMonitor::failedAllocThunk4, this);
-        _allocHookType = AllocHookType::WithArg;
-        return true;
-    } else if constexpr (kCanUseThunk3) {
-        _allocInstance = this;
-
-        if constexpr (kRegisterAcceptsContext) {
-            heap_caps_register_failed_alloc_callback(&ESPMemoryMonitor::failedAllocThunk3, this);
-        } else {
-            heap_caps_register_failed_alloc_callback(&ESPMemoryMonitor::failedAllocThunk3);
-        }
-
-        _allocHookType = AllocHookType::NoArg;
-        return true;
-    } else {
-        return false;
-    }
+    heap_caps_register_failed_alloc_callback([this](size_t requested_size, uint32_t caps, const char *function_name) {
+        handleAllocEvent(size, caps, function_name);
+    });
 }
 
 void ESPMemoryMonitor::unregisterFailedAllocCallback() {
-    if constexpr (kRegisterAcceptsContext) {
-        if (_allocHookType == AllocHookType::WithArg) {
-            // Newer IDF builds may support unregister, but registering nullptr disconnects too.
-            heap_caps_register_failed_alloc_callback(nullptr, nullptr);
-        } else if (_allocHookType == AllocHookType::NoArg) {
-            if (_allocInstance == this) {
-                _allocInstance = nullptr;
-                heap_caps_register_failed_alloc_callback(nullptr, nullptr);
-            }
-        }
-    } else {  // Register function takes a single callback argument.
-        if (_allocHookType == AllocHookType::NoArg && _allocInstance == this) {
-            _allocInstance = nullptr;
-            heap_caps_register_failed_alloc_callback(nullptr);
-        }
-    }
-
-    _allocHookType = AllocHookType::None;
+    heap_caps_register_failed_alloc_callback(nullptr);
 }
 
-void ESPMemoryMonitor::failedAllocThunk3(size_t size, uint32_t caps, const char* functionName) {
-    auto* self = _allocInstance;
-    if (self == nullptr) {
-        return;
-    }
-    self->handleAllocEvent(size, caps, functionName);
-}
-
-void ESPMemoryMonitor::failedAllocThunk4(size_t size, uint32_t caps, const char* functionName, void* arg) {
-    auto* self = static_cast<ESPMemoryMonitor*>(arg);
-    if (self == nullptr) {
-        return;
-    }
-    self->handleAllocEvent(size, caps, functionName);
-}
