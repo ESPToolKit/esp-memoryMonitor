@@ -20,13 +20,15 @@ struct FunctionPointerTraits<R (*)(Args...)> {
 using RegisterFn = decltype(&heap_caps_register_failed_alloc_callback);
 using HookFn = esp_alloc_failed_hook_t;
 using RegisterTraits = FunctionPointerTraits<RegisterFn>;
-using HookTraits = FunctionPointerTraits<HookFn>;
 
-constexpr bool kRegisterSupportsArg = RegisterTraits::kArity == 2;
-constexpr bool kRegisterSupportsNoArg = RegisterTraits::kArity == 1;
+constexpr bool kRegisterSupportsArg =
+    std::is_invocable_r_v<esp_err_t, RegisterFn, HookFn, void*> || RegisterTraits::kArity == 2;
+constexpr bool kRegisterSupportsNoArg = std::is_invocable_r_v<esp_err_t, RegisterFn, HookFn> || RegisterTraits::kArity == 1;
 
-constexpr bool kHookTakesArg = HookTraits::kArity == 4;
-constexpr bool kHookTakesNoArg = HookTraits::kArity == 3;
+constexpr bool kHookTakesArg =
+    std::is_invocable_r_v<void, HookFn, size_t, uint32_t, const char*, void*> || FunctionPointerTraits<HookFn>::kArity == 4;
+constexpr bool kHookTakesNoArg =
+    std::is_invocable_r_v<void, HookFn, size_t, uint32_t, const char*> || FunctionPointerTraits<HookFn>::kArity == 3;
 
 static_assert(kRegisterSupportsArg || kRegisterSupportsNoArg,
               "Unsupported heap_caps_register_failed_alloc_callback signature");
