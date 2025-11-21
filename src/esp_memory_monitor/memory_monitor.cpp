@@ -12,46 +12,27 @@ constexpr const char* kSamplerTaskName = "ESPMemoryMon";
 using RegisterFn = decltype(&heap_caps_register_failed_alloc_callback);
 using HookFn = esp_alloc_failed_hook_t;
 
-using HookWithArgFn = void (*)(size_t, uint32_t, const char*, void*);
-using HookNoArgFn = void (*)(size_t, uint32_t, const char*);
+template <typename T>
+struct FunctionPointerTraits;
 
-template <typename Hook, typename = void>
-struct RegisterAcceptsHook4WithCtx : std::false_type {};
-template <typename Hook>
-struct RegisterAcceptsHook4WithCtx<Hook,
-                                   std::void_t<decltype(heap_caps_register_failed_alloc_callback(std::declval<Hook>(),
-                                                                                                 std::declval<void*>()))>>
-    : std::true_type {};
+template <typename R, typename... Args>
+struct FunctionPointerTraits<R (*)(Args...)> {
+    static constexpr size_t kArity = sizeof...(Args);
+};
 
-template <typename Hook, typename = void>
-struct RegisterAcceptsHook4NoCtx : std::false_type {};
-template <typename Hook>
-struct RegisterAcceptsHook4NoCtx<Hook, std::void_t<decltype(heap_caps_register_failed_alloc_callback(std::declval<Hook>()))>>
-    : std::true_type {};
+using RegisterTraits = FunctionPointerTraits<RegisterFn>;
+using HookTraits = FunctionPointerTraits<HookFn>;
 
-template <typename Hook, typename = void>
-struct RegisterAcceptsHook3WithCtx : std::false_type {};
-template <typename Hook>
-struct RegisterAcceptsHook3WithCtx<Hook,
-                                   std::void_t<decltype(heap_caps_register_failed_alloc_callback(std::declval<Hook>(),
-                                                                                                 std::declval<void*>()))>>
-    : std::true_type {};
+constexpr bool kRegisterAcceptsContext = RegisterTraits::kArity == 2;
+constexpr bool kHookHasContextArg = HookTraits::kArity == 4;
+constexpr bool kHookHasNoContextArg = HookTraits::kArity == 3;
 
-template <typename Hook, typename = void>
-struct RegisterAcceptsHook3NoCtx : std::false_type {};
-template <typename Hook>
-struct RegisterAcceptsHook3NoCtx<Hook, std::void_t<decltype(heap_caps_register_failed_alloc_callback(std::declval<Hook>()))>>
-    : std::true_type {};
+static_assert(kRegisterAcceptsContext || RegisterTraits::kArity == 1,
+              "Unsupported heap_caps_register_failed_alloc_callback signature");
+static_assert(kHookHasContextArg || kHookHasNoContextArg, "Unsupported failed alloc hook signature");
 
-constexpr bool kRegisterAcceptsHook4WithCtx = RegisterAcceptsHook4WithCtx<HookWithArgFn>::value;
-constexpr bool kRegisterAcceptsHook4NoCtx = RegisterAcceptsHook4NoCtx<HookWithArgFn>::value;
-constexpr bool kRegisterAcceptsHook3WithCtx = RegisterAcceptsHook3WithCtx<HookNoArgFn>::value;
-constexpr bool kRegisterAcceptsHook3NoCtx = RegisterAcceptsHook3NoCtx<HookNoArgFn>::value;
-
-constexpr bool kCanUseThunk4 = kRegisterAcceptsHook4WithCtx || kRegisterAcceptsHook4NoCtx;
-constexpr bool kCanUseThunk3 = kRegisterAcceptsHook3WithCtx || kRegisterAcceptsHook3NoCtx;
-
-static_assert(kCanUseThunk4 || kCanUseThunk3, "Unsupported failed alloc callback signature");
+constexpr bool kCanUseThunk4 = kRegisterAcceptsContext && kHookHasContextArg;
+constexpr bool kCanUseThunk3 = kHookHasNoContextArg;
 
 inline TickType_t delayTicks(uint32_t intervalMs) {
     const TickType_t ticks = pdMS_TO_TICKS(intervalMs);
@@ -372,17 +353,13 @@ void ESPMemoryMonitor::handleAllocEvent(size_t requestedBytes, uint32_t caps, co
 
 bool ESPMemoryMonitor::registerFailedAllocCallback() {
     if constexpr (kCanUseThunk4) {
-        if constexpr (kRegisterAcceptsHook4WithCtx) {
-            heap_caps_register_failed_alloc_callback(&ESPMemoryMonitor::failedAllocThunk4, this);
-        } else {
-            heap_caps_register_failed_alloc_callback(&ESPMemoryMonitor::failedAllocThunk4);
-        }
+        heap_caps_register_failed_alloc_callback(&ESPMemoryMonitor::failedAllocThunk4, this);
         _allocHookType = AllocHookType::WithArg;
         return true;
     } else if constexpr (kCanUseThunk3) {
         _allocInstance = this;
 
-        if constexpr (kRegisterAcceptsHook3WithCtx) {
+        if constexpr (kRegisterAcceptsContext) {
             heap_caps_register_failed_alloc_callback(&ESPMemoryMonitor::failedAllocThunk3, this);
         } else {
             heap_caps_register_failed_alloc_callback(&ESPMemoryMonitor::failedAllocThunk3);
@@ -396,22 +373,20 @@ bool ESPMemoryMonitor::registerFailedAllocCallback() {
 }
 
 void ESPMemoryMonitor::unregisterFailedAllocCallback() {
-    if (_allocHookType == AllocHookType::WithArg) {
-        if constexpr (kRegisterAcceptsHook4WithCtx) {
+    if constexpr (kRegisterAcceptsContext) {
+        if (_allocHookType == AllocHookType::WithArg) {
             // Newer IDF builds may support unregister, but registering nullptr disconnects too.
             heap_caps_register_failed_alloc_callback(nullptr, nullptr);
-        } else if constexpr (kRegisterAcceptsHook4NoCtx) {
-            heap_caps_register_failed_alloc_callback(nullptr);
-        }
-    } else if (_allocHookType == AllocHookType::NoArg) {
-        if (_allocInstance == this) {
-            _allocInstance = nullptr;
-
-            if constexpr (kRegisterAcceptsHook3NoCtx) {
-                heap_caps_register_failed_alloc_callback(nullptr);
-            } else if constexpr (kRegisterAcceptsHook3WithCtx) {
+        } else if (_allocHookType == AllocHookType::NoArg) {
+            if (_allocInstance == this) {
+                _allocInstance = nullptr;
                 heap_caps_register_failed_alloc_callback(nullptr, nullptr);
             }
+        }
+    } else {  // Register function takes a single callback argument.
+        if (_allocHookType == AllocHookType::NoArg && _allocInstance == this) {
+            _allocInstance = nullptr;
+            heap_caps_register_failed_alloc_callback(nullptr);
         }
     }
 
