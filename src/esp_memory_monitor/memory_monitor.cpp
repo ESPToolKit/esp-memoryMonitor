@@ -9,29 +9,22 @@ ESPMemoryMonitor* ESPMemoryMonitor::_allocInstance = nullptr;
 namespace {
 constexpr const char* kSamplerTaskName = "ESPMemoryMon";
 
-template <typename T>
-struct FunctionPointerTraits;
-
-template <typename R, typename... Args>
-struct FunctionPointerTraits<R (*)(Args...)> {
-    static constexpr size_t kArity = sizeof...(Args);
-};
-
 using RegisterFn = decltype(&heap_caps_register_failed_alloc_callback);
-using RegisterTraits = FunctionPointerTraits<RegisterFn>;
-using HookTraits = FunctionPointerTraits<esp_alloc_failed_hook_t>;
+using HookFn = esp_alloc_failed_hook_t;
+using RegisterWithArgFn = esp_err_t (*)(HookFn, void*);
+using RegisterNoArgFn = esp_err_t (*)(HookFn);
 
-constexpr bool kRegisterSupportsArg = RegisterTraits::kArity == 2;
-constexpr bool kRegisterSupportsNoArg = RegisterTraits::kArity == 1;
-constexpr bool kAllocHookTakesArg = HookTraits::kArity == 4;
-constexpr bool kAllocHookTakesNoArg = HookTraits::kArity == 3;
+constexpr bool kRegisterSupportsArg = std::is_convertible_v<RegisterFn, RegisterWithArgFn>;
+constexpr bool kRegisterSupportsNoArg = std::is_convertible_v<RegisterFn, RegisterNoArgFn>;
+constexpr bool kHookAcceptsThunk4 = std::is_convertible_v<decltype(&ESPMemoryMonitor::failedAllocThunk4), HookFn>;
+constexpr bool kHookAcceptsThunk3 = std::is_convertible_v<decltype(&ESPMemoryMonitor::failedAllocThunk3), HookFn>;
 
 static_assert(kRegisterSupportsArg || kRegisterSupportsNoArg,
               "Unsupported heap_caps_register_failed_alloc_callback signature");
-static_assert(kAllocHookTakesArg || kAllocHookTakesNoArg, "Unsupported failed alloc hook signature");
+static_assert(kHookAcceptsThunk4 || kHookAcceptsThunk3, "Unsupported failed alloc hook signature");
 
-constexpr bool kCanUseThunk4 = kAllocHookTakesArg && kRegisterSupportsArg;
-constexpr bool kCanUseThunk3 = kAllocHookTakesNoArg && (kRegisterSupportsArg || kRegisterSupportsNoArg);
+constexpr bool kCanUseThunk4 = kHookAcceptsThunk4 && kRegisterSupportsArg;
+constexpr bool kCanUseThunk3 = kHookAcceptsThunk3 && (kRegisterSupportsArg || kRegisterSupportsNoArg);
 
 static_assert(kCanUseThunk4 || kCanUseThunk3, "Unsupported failed alloc callback signature");
 
