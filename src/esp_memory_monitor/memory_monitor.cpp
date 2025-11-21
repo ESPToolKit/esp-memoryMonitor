@@ -12,42 +12,29 @@ constexpr const char* kSamplerTaskName = "ESPMemoryMon";
 using RegisterFn = decltype(&heap_caps_register_failed_alloc_callback);
 using HookFn = esp_alloc_failed_hook_t;
 
-template <class AlwaysVoid, template <class...> class Op, class... Args>
-struct is_detected_impl : std::false_type {};
-template <template <class...> class Op, class... Args>
-struct is_detected_impl<std::void_t<Op<Args...>>, Op, Args...> : std::true_type {};
-template <template <class...> class Op, class... Args>
-constexpr bool is_detected_v = is_detected_impl<void, Op, Args...>::value;
+template <typename T>
+struct FunctionPointerTraits;
 
-using RegisterWithArgFn = esp_err_t (*)(HookFn, void*);
-using RegisterNoArgFn = esp_err_t (*)(HookFn);
-using HookWithArgFn = void (*)(size_t, uint32_t, const char*, void*);
-using HookNoArgFn = void (*)(size_t, uint32_t, const char*);
+template <typename R, typename... Args>
+struct FunctionPointerTraits<R (*)(Args...)> {
+    static constexpr size_t kArity = sizeof...(Args);
+};
 
-template <typename Hook>
-using RegisterCallWithArgOp = decltype(heap_caps_register_failed_alloc_callback(std::declval<Hook>(), std::declval<void*>()));
-template <typename Hook>
-using RegisterCallNoArgOp = decltype(heap_caps_register_failed_alloc_callback(std::declval<Hook>()));
+using RegisterTraits = FunctionPointerTraits<RegisterFn>;
+using HookTraits = FunctionPointerTraits<HookFn>;
 
-template <typename Hook>
-using HookCallWithArgOp =
-    decltype(std::declval<Hook>()(std::declval<size_t>(), std::declval<uint32_t>(), static_cast<const char*>(nullptr), static_cast<void*>(nullptr)));
-template <typename Hook>
-using HookCallNoArgOp =
-    decltype(std::declval<Hook>()(std::declval<size_t>(), std::declval<uint32_t>(), static_cast<const char*>(nullptr)));
+constexpr bool kRegisterSupportsArg = RegisterTraits::kArity == 2;
+constexpr bool kRegisterSupportsNoArg = RegisterTraits::kArity == 1;
 
-constexpr bool kRegisterSupportsArg = is_detected_v<RegisterCallWithArgOp, HookFn>;
-constexpr bool kRegisterSupportsNoArg = is_detected_v<RegisterCallNoArgOp, HookFn>;
-
-constexpr bool kHookTakesArg = is_detected_v<HookCallWithArgOp, HookFn>;
-constexpr bool kHookTakesNoArg = is_detected_v<HookCallNoArgOp, HookFn>;
+constexpr bool kHookTakesArg = HookTraits::kArity == 4;
+constexpr bool kHookTakesNoArg = HookTraits::kArity == 3;
 
 static_assert(kRegisterSupportsArg || kRegisterSupportsNoArg,
               "Unsupported heap_caps_register_failed_alloc_callback signature");
 static_assert(kHookTakesArg || kHookTakesNoArg, "Unsupported failed alloc hook signature");
 
-constexpr bool kCanUseThunk4 = kHookTakesArg && is_detected_v<RegisterCallWithArgOp, HookWithArgFn>;
-constexpr bool kCanUseThunk3 = kHookTakesNoArg && (is_detected_v<RegisterCallWithArgOp, HookNoArgFn> || is_detected_v<RegisterCallNoArgOp, HookNoArgFn>);
+constexpr bool kCanUseThunk4 = kHookTakesArg && kRegisterSupportsArg;
+constexpr bool kCanUseThunk3 = kHookTakesNoArg && (kRegisterSupportsArg || kRegisterSupportsNoArg);
 
 static_assert(kCanUseThunk4 || kCanUseThunk3, "Unsupported failed alloc callback signature");
 
