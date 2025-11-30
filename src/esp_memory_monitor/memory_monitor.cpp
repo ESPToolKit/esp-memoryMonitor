@@ -978,9 +978,9 @@ void toJson(const MemorySnapshot& snap, JsonDocument& doc) {
     JsonObject root = doc.to<JsonObject>();
     root["timestampUs"] = snap.timestampUs;
 
-    JsonArray regions = root.createNestedArray("regions");
+    JsonArray regions = root["regions"].to<JsonArray>();
     for (const auto& region : snap.regions) {
-        JsonObject obj = regions.createNestedObject();
+        JsonObject obj = regions.add<JsonObject>();
         obj["region"] = region.region == MemoryRegion::Psram ? "psram" : "internal";
         obj["freeBytes"] = region.freeBytes;
         obj["minimumFreeBytes"] = region.minimumFreeBytes;
@@ -990,16 +990,16 @@ void toJson(const MemorySnapshot& snap, JsonDocument& doc) {
         obj["secondsToWarn"] = region.secondsToWarn;
         obj["secondsToCritical"] = region.secondsToCritical;
 
-        JsonObject window = obj.createNestedObject("window");
+        JsonObject window = obj["window"].to<JsonObject>();
         window["minFree"] = region.window.minFree;
         window["maxFree"] = region.window.maxFree;
         window["avgFree"] = region.window.avgFree;
         window["avgFragmentation"] = region.window.avgFragmentation;
     }
 
-    JsonArray stacks = root.createNestedArray("stacks");
+    JsonArray stacks = root["stacks"].to<JsonArray>();
     for (const auto& stack : snap.stacks) {
-        JsonObject obj = stacks.createNestedObject();
+        JsonObject obj = stacks.add<JsonObject>();
         obj["name"] = stack.name;
         obj["freeHighWaterBytes"] = stack.freeHighWaterBytes;
         obj["state"] = static_cast<int>(stack.state);

@@ -94,7 +94,7 @@ static void simulateOtaChunk() {
 
 static void exportSnapshotJson() {
 #if ESPMM_HAS_ARDUINOJSON && ESPMM_EXAMPLE_HAS_JSON
-    StaticJsonDocument<2048> doc;
+    JsonDocument doc;
     const MemorySnapshot snap = monitor.sampleNow();
     toJson(snap, doc);
     serializeJson(doc, Serial);

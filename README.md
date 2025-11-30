@@ -134,6 +134,16 @@ See `examples/scopes_and_leakcheck/scopes_and_leakcheck.ino` for a walkthrough t
 - `bool installPanicHook(PanicCallback cb = {})` / `void uninstallPanicHook()` – capture a pre-abort snapshot via the shutdown hook.
 - `void toJson(const MemorySnapshot&, JsonDocument &doc)` – serialize a snapshot via ArduinoJson for HTTP/MQTT/telemetry (enabled when ArduinoJson is available).
 
+### ArduinoJson 7 export
+When ArduinoJson is available, use version 7’s `JsonDocument` (auto-growing) and the new `to<>()`/`add<>()` helpers:
+```cpp
+#if ESPMM_HAS_ARDUINOJSON
+JsonDocument doc;
+toJson(monitor.sampleNow(), doc);
+serializeJson(doc, Serial);
+#endif
+```
+
 `MemoryMonitorConfig` knobs:
 
 | Field | Default | Description |
