@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        board: [esp32dev, esp32-s3-devkitc-1, esp32-c3-devkitm-1]
+        board: [esp32dev, esp32-s3-devkitc-1, esp32-c3-devkitm-1, esp32-p4-devkit]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -57,6 +57,7 @@ jobs:
         esp32:esp32:esp32 esp32dev
         esp32:esp32:esp32s3 esp32-s3-devkitc-1
         esp32:esp32:esp32c3 esp32-c3-devkitm-1
+        esp32:esp32:esp32p4 esp32-p4-devkit
     steps:
       - name: Checkout
         uses: actions/checkout@v4
