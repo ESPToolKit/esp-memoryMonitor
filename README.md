@@ -113,11 +113,11 @@ void loop() {
 
 When you need richer stack info or failed-allocation events, flip `enablePerTaskStacks` and `enableFailedAllocEvents` in the config. The latest snapshot and the full ring buffer are always available via `sampleNow()`/`history()`.
 
-### Scope/tag + leak checkpoint example
-See `examples/scopes_and_leakcheck/scopes_and_leakcheck.ino` for a walkthrough that:
-- Registers tags/budgets, measures per-scope deltas, and reacts to tag thresholds.
-- Marks leak checkpoints to detect steady-state drift.
-- Emits task stack transitions and exports snapshots to JSON (when ArduinoJson is available).
+### Example sketches
+- `examples/basic_monitor`: background sampler with threshold callbacks, scopes, and per-task stack visibility.
+- `examples/scopes_and_leakcheck`: tag budgets, leak checkpoints, and JSON export when ArduinoJson is present.
+- `examples/manual_sampling`: sampler task disabled; calls `sampleNow()` from `loop()` while still tracking scopes and tag budgets.
+- `examples/panic_hook`: per-task stack thresholds, failed-allocation hook, optional JSON export, and a panic hook that dumps a final snapshot (send `p` over serial to try it).
 
 ## API Reference
 - `bool init(const MemoryMonitorConfig &cfg = {})` / `void deinit()` – start/stop the monitor. When `enableSamplerTask` is `false`, call `sampleNow()` manually.
