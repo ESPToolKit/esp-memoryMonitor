@@ -294,7 +294,7 @@ class ESPMemoryMonitor {
     void samplerTaskLoop();
 
     static void allocFailedHook(size_t requestedBytes, uint32_t caps, const char* functionName);
-    ESPMemoryMonitor* _failedAllocInstance;
+    static ESPMemoryMonitor* _failedAllocInstance;
 
     MemorySnapshot captureSnapshot() const;
     RegionStats captureRegion(uint32_t caps, MemoryRegion region) const;

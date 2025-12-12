@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Added
 - More ESPMemoryMonitor examples: manual sampling without the background task and a panic-hook sketch that captures a final snapshot.
+### Fixed
+- Mark the failed-allocation hook instance pointer as static so Arduino builds compile the callback correctly.
 
 ## [1.0.0] - 2025-12-02
 ### Added
