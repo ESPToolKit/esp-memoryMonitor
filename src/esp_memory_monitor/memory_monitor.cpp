@@ -1,12 +1,12 @@
 #include "esp_memory_monitor/memory_monitor.h"
 
+#include <esp_log.h>
+#include <esp_system.h>
+
 #include <algorithm>
 #include <cmath>
 #include <numeric>
 #include <utility>
-
-#include <esp_log.h>
-#include <esp_system.h>
 
 namespace {
 constexpr const char* kSamplerTaskName = "ESPMemoryMon";
@@ -27,7 +27,7 @@ inline size_t saturatingSubtract(size_t value, size_t delta) {
 }
 }  // namespace
 
-static ESPMemoryMonitor* gPanicInstance = nullptr;
+ESPMemoryMonitor* gPanicInstance = nullptr;
 ESPMemoryMonitor* ESPMemoryMonitor::_failedAllocInstance = nullptr;
 
 MemoryScope::MemoryScope(ESPMemoryMonitor* monitor, std::string name, MemoryTag tag, size_t startInternal, size_t startPsram, uint64_t startUs)

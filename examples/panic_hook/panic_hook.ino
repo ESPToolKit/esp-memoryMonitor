@@ -10,20 +10,21 @@
 #endif
 #include <ESPMemoryMonitor.h>
 #include <esp_log.h>
+
 #include <vector>
 
-static ESPMemoryMonitor monitor;
+ESPMemoryMonitor monitor;
 static uint32_t lastSampleMs = 0;
 
-static void emitSnapshot(const MemorySnapshot &snap) {
+static void emitSnapshot(const MemorySnapshot& snap) {
 #if ESPMM_HAS_ARDUINOJSON && ESPMM_EXAMPLE_HAS_JSON
     JsonDocument doc;
     toJson(snap, doc);
     serializeJson(doc, Serial);
     Serial.println();
 #else
-    for (const auto &region : snap.regions) {
-        const char *name = region.region == MemoryRegion::Psram ? "PSRAM" : "DRAM";
+    for (const auto& region : snap.regions) {
+        const char* name = region.region == MemoryRegion::Psram ? "PSRAM" : "DRAM";
         ESP_LOGI("MEM", "%s free=%uB min=%uB", name,
                  static_cast<unsigned>(region.freeBytes),
                  static_cast<unsigned>(region.minimumFreeBytes));
@@ -52,12 +53,12 @@ void setup() {
 
     monitor.onSample(emitSnapshot);
 
-    monitor.onFailedAlloc([](const FailedAllocEvent &evt) {
+    monitor.onFailedAlloc([](const FailedAllocEvent& evt) {
         ESP_LOGE("ALLOC", "failed alloc size=%u caps=0x%08x from %s",
                  static_cast<unsigned>(evt.requestedBytes), evt.caps, evt.functionName);
     });
 
-    monitor.onTaskStackThreshold([](const TaskStackEvent &evt) {
+    monitor.onTaskStackThreshold([](const TaskStackEvent& evt) {
         if (evt.appeared) {
             ESP_LOGI("TASK", "task appeared: %s", evt.usage.name.c_str());
             return;
@@ -68,12 +69,12 @@ void setup() {
         }
         ESP_LOGW("TASK", "%s stack %s (%uB headroom)",
                  evt.usage.name.c_str(),
-                 evt.state == StackState::Critical ? "CRITICAL" :
-                 evt.state == StackState::Warn ? "WARN" : "SAFE",
+                 evt.state == StackState::Critical ? "CRITICAL" : evt.state == StackState::Warn ? "WARN"
+                                                                                                : "SAFE",
                  static_cast<unsigned>(evt.usage.freeHighWaterBytes));
     });
 
-    if (!monitor.installPanicHook([](const MemorySnapshot &snap) {
+    if (!monitor.installPanicHook([](const MemorySnapshot& snap) {
             ESP_LOGE("PANIC", "captured panic snapshot");
             emitSnapshot(snap);
         })) {

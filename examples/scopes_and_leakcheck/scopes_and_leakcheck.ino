@@ -11,7 +11,7 @@
 #include <ESPMemoryMonitor.h>
 #include <esp_log.h>
 
-static ESPMemoryMonitor monitor;
+ESPMemoryMonitor monitor;
 static MemoryTag httpTag;
 static MemoryTag otaTag;
 
@@ -35,7 +35,7 @@ void setup() {
     monitor.setTagBudget(httpTag, {60 * 1024, 80 * 1024});
     monitor.setTagBudget(otaTag, {40 * 1024, 64 * 1024});
 
-    monitor.onScope([](const ScopeStats &s) {
+    monitor.onScope([](const ScopeStats& s) {
         ESP_LOGI("SCOPE", "%s used %+d DRAM %+d PSRAM in %llu us",
                  s.name.c_str(),
                  static_cast<int>(s.deltaInternalBytes),
@@ -43,17 +43,17 @@ void setup() {
                  static_cast<unsigned long long>(s.durationUs));
     });
 
-    monitor.onTagThreshold([](const TagThresholdEvent &evt) {
+    monitor.onTagThreshold([](const TagThresholdEvent& evt) {
         ESP_LOGW("TAG", "%s now %s at %u bytes",
                  evt.usage.name.c_str(),
-                 evt.usage.state == ThresholdState::Critical ? "CRITICAL" :
-                 evt.usage.state == ThresholdState::Warn ? "WARN" : "OK",
+                 evt.usage.state == ThresholdState::Critical ? "CRITICAL" : evt.usage.state == ThresholdState::Warn ? "WARN"
+                                                                                                                    : "OK",
                  static_cast<unsigned>(evt.usage.totalInternalBytes + evt.usage.totalPsramBytes));
     });
 
-    monitor.onLeakCheck([](const LeakCheckResult &res) {
-        for (const auto &d : res.deltas) {
-            const char *regionName = d.region == MemoryRegion::Psram ? "PSRAM" : "DRAM";
+    monitor.onLeakCheck([](const LeakCheckResult& res) {
+        for (const auto& d : res.deltas) {
+            const char* regionName = d.region == MemoryRegion::Psram ? "PSRAM" : "DRAM";
             ESP_LOGI("LEAK", "%s drift %+0.1fB frag %+0.2f", regionName, d.deltaFreeBytes, d.deltaFragmentation);
         }
         if (res.leakSuspected) {
@@ -61,7 +61,7 @@ void setup() {
         }
     });
 
-    monitor.onTaskStackThreshold([](const TaskStackEvent &evt) {
+    monitor.onTaskStackThreshold([](const TaskStackEvent& evt) {
         if (evt.appeared) {
             ESP_LOGI("TASK", "task created: %s", evt.usage.name.c_str());
             return;
@@ -72,8 +72,8 @@ void setup() {
         }
         ESP_LOGW("TASK", "%s stack %s (%uB headroom)",
                  evt.usage.name.c_str(),
-                 evt.state == StackState::Critical ? "CRITICAL" :
-                 evt.state == StackState::Warn ? "WARN" : "SAFE",
+                 evt.state == StackState::Critical ? "CRITICAL" : evt.state == StackState::Warn ? "WARN"
+                                                                                                : "SAFE",
                  static_cast<unsigned>(evt.usage.freeHighWaterBytes));
     });
 }

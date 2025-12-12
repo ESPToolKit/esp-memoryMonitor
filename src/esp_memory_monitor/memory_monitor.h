@@ -203,7 +203,7 @@ class MemoryScope;
 class ESPMemoryMonitor;
 
 class MemoryScope {
-  public:
+   public:
     MemoryScope() = default;
     ~MemoryScope();
 
@@ -215,7 +215,7 @@ class MemoryScope {
     ScopeStats end();
     bool active() const { return _monitor != nullptr && !_ended; }
 
-  private:
+   private:
     friend class ESPMemoryMonitor;
     MemoryScope(ESPMemoryMonitor* monitor, std::string name, MemoryTag tag, size_t startInternal, size_t startPsram, uint64_t startUs);
 
@@ -229,7 +229,7 @@ class MemoryScope {
 };
 
 class ESPMemoryMonitor {
-  public:
+   public:
     friend class MemoryScope;
     ESPMemoryMonitor() = default;
     ~ESPMemoryMonitor();
@@ -263,7 +263,7 @@ class ESPMemoryMonitor {
     bool installPanicHook(PanicCallback callback = nullptr);
     void uninstallPanicHook();
 
-  private:
+   private:
     enum class AllocHookType {
         None = 0,
         WithArg,
@@ -286,7 +286,7 @@ class ESPMemoryMonitor {
         LockGuard(const LockGuard&) = delete;
         LockGuard& operator=(const LockGuard&) = delete;
 
-      private:
+       private:
         SemaphoreHandle_t _handle;
     };
 
@@ -294,8 +294,8 @@ class ESPMemoryMonitor {
     void samplerTaskLoop();
 
     static void allocFailedHook(size_t requestedBytes, uint32_t caps, const char* functionName);
-    static ESPMemoryMonitor* _failedAllocInstance;
-    
+    ESPMemoryMonitor* _failedAllocInstance;
+
     MemorySnapshot captureSnapshot() const;
     RegionStats captureRegion(uint32_t caps, MemoryRegion region) const;
     std::vector<TaskStackUsage> captureStacks() const;

@@ -27,7 +27,7 @@ Minimal monitor with threshold alerting:
 #include <ESPMemoryMonitor.h>
 #include <esp_log.h>
 
-static ESPMemoryMonitor monitor;
+ESPMemoryMonitor monitor;
 static MemoryTag httpTag;
 
 void setup() {
