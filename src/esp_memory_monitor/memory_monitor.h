@@ -32,7 +32,6 @@ extern "C" {
 #include <esp_heap_caps.h>
 #include <esp_timer.h>
 
-#include <ESPWorker.h>
 #include "memory_monitor_allocator.h"
 
 enum class MemoryRegion {
@@ -399,9 +398,8 @@ class ESPMemoryMonitor {
     bool _initialized = false;
     bool _running = false;
     bool _usePSRAMBuffers = false;
-    ESPWorker _worker{};
     SemaphoreHandle_t _mutex = nullptr;
-    std::shared_ptr<WorkerHandler> _samplerTask{};
+    TaskHandle_t _samplerTask = nullptr;
     MemoryMonitorDeque<InternalMemorySnapshot> _history;
     std::array<ThresholdState, 2> _thresholdStates{ThresholdState::Normal, ThresholdState::Normal};
     SampleCallback _sampleCallback;

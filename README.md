@@ -8,7 +8,7 @@ ESPMemoryMonitor is a tiny C++17 helper that wraps ESP-IDF heap/stack inspection
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.md)
 
 ## Features
-- One-shot snapshots via `sampleNow()` or a background sampler task (spawned by `ESPWorker`) that pushes results through `onSample` and records a ring buffer (default: 60 entries).
+- One-shot snapshots via `sampleNow()` or a background sampler task (spawned with native FreeRTOS task APIs) that pushes results through `onSample` and records a ring buffer (default: 60 entries).
 - Tracks internal DRAM and PSRAM (`MALLOC_CAP_8BIT` / `MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT`) with free bytes, low-water mark, largest free block, and optional fragmentation score.
 - Per-region thresholds with hysteresis; `onThreshold` fires on enter/exit of warn/critical bands so alerts do not spam as memory bounces.
 - Optional extras: per-task stack high-water (via `uxTaskGetSystemState`), min-ever-free, and IDF failed-allocation callbacks (`heap_caps_register_failed_alloc_callback`).

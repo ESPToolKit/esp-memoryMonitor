@@ -107,31 +107,24 @@ bool ESPMemoryMonitor::init(const MemoryMonitorConfig& config) {
     }
 
     _running = _config.enableSamplerTask && _config.sampleIntervalMs > 0;
-    ESPWorker::Config workerConfig{};
-    workerConfig.maxWorkers = 1;
-    workerConfig.stackSizeBytes = _config.stackSize;
-    workerConfig.priority = _config.priority;
-    workerConfig.coreId = _config.coreId;
-    workerConfig.enableExternalStacks = true;
-    _worker.init(workerConfig);
 
     if (_running) {
-        WorkerConfig taskConfig{};
-        taskConfig.name = kSamplerTaskName;
-        taskConfig.stackSizeBytes = _config.stackSize;
-        taskConfig.priority = _config.priority;
-        taskConfig.coreId = _config.coreId;
-        WorkerResult created = _config.usePSRAMBuffers ? _worker.spawnExt([this]() { samplerTaskLoop(); }, taskConfig)
-                                                       : _worker.spawn([this]() { samplerTaskLoop(); }, taskConfig);
+        const BaseType_t created = xTaskCreatePinnedToCore(
+            &ESPMemoryMonitor::samplerTaskThunk,
+            kSamplerTaskName,
+            _config.stackSize,
+            this,
+            _config.priority,
+            &_samplerTask,
+            _config.coreId);
 
-        if (!created) {
+        if (created != pdPASS) {
             _running = false;
             unregisterFailedAllocCallback();
             vSemaphoreDelete(_mutex);
             _mutex = nullptr;
             return false;
         }
-        _samplerTask = created.handler;
     }
 
     _initialized = true;
@@ -146,9 +139,14 @@ void ESPMemoryMonitor::deinit() {
     _running = false;
 
     if (_samplerTask != nullptr) {
-        (void)_samplerTask->wait(pdMS_TO_TICKS(200));
-        (void)_samplerTask->destroy();
-        _samplerTask.reset();
+        TickType_t start = xTaskGetTickCount();
+        while (_samplerTask != nullptr && (xTaskGetTickCount() - start) <= pdMS_TO_TICKS(200)) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+        if (_samplerTask != nullptr) {
+            vTaskDelete(_samplerTask);
+            _samplerTask = nullptr;
+        }
     }
 
     unregisterFailedAllocCallback();
@@ -179,8 +177,6 @@ void ESPMemoryMonitor::deinit() {
         vSemaphoreDelete(_mutex);
         _mutex = nullptr;
     }
-    _worker.deinit();
-
     _initialized = false;
     _panicHookInstalled = false;
 }
@@ -402,6 +398,8 @@ void ESPMemoryMonitor::samplerTaskLoop() {
         sampleNow();
         vTaskDelay(delayTicks(_config.sampleIntervalMs));
     }
+    _samplerTask = nullptr;
+    vTaskDelete(nullptr);
 }
 
 ESPMemoryMonitor::InternalMemorySnapshot ESPMemoryMonitor::captureSnapshot() const {
