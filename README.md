@@ -8,7 +8,7 @@ ESPMemoryMonitor is a tiny C++17 helper that wraps ESP-IDF heap/stack inspection
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.md)
 
 ## Features
-- One-shot snapshots via `sampleNow()` or a background sampler task that pushes results through `onSample` and records a ring buffer (default: 60 entries).
+- One-shot snapshots via `sampleNow()` or a background sampler task (spawned by `ESPWorker`) that pushes results through `onSample` and records a ring buffer (default: 60 entries).
 - Tracks internal DRAM and PSRAM (`MALLOC_CAP_8BIT` / `MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT`) with free bytes, low-water mark, largest free block, and optional fragmentation score.
 - Per-region thresholds with hysteresis; `onThreshold` fires on enter/exit of warn/critical bands so alerts do not spam as memory bounces.
 - Optional extras: per-task stack high-water (via `uxTaskGetSystemState`), min-ever-free, and IDF failed-allocation callbacks (`heap_caps_register_failed_alloc_callback`).
@@ -18,7 +18,7 @@ ESPMemoryMonitor is a tiny C++17 helper that wraps ESP-IDF heap/stack inspection
 - Task visibility: stack state transitions (`Safe/Warn/Critical`), optional new/vanished task detection, and per-task thresholds.
 - Export/panic helpers: convert snapshots to ArduinoJson for telemetry and install a shutdown/panic hook that captures a final snapshot before abort/restart.
 - Optional PSRAM-backed monitor-owned buffers via `usePSRAMBuffers` (through `ESPBufferManager`) with automatic fallback to normal heap on non-PSRAM boards, including long-lived state, hot-path transient scratch containers, and internal storage models that are converted to public API structs at boundaries.
-- Thread-safe with FreeRTOS mutexes; destructor tears down the sampler task and unregisters callbacks.
+- Thread-safe with FreeRTOS mutexes; destructor tears down the sampler worker and unregisters callbacks.
 
 ## Examples
 Minimal monitor with threshold alerting:
