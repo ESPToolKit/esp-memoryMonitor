@@ -25,10 +25,21 @@ inline size_t regionIndex(MemoryRegion region) {
 inline size_t saturatingSubtract(size_t value, size_t delta) {
     return value > delta ? value - delta : 0;
 }
+
 }  // namespace
 
 ESPMemoryMonitor* gPanicInstance = nullptr;
 ESPMemoryMonitor* ESPMemoryMonitor::_failedAllocInstance = nullptr;
+
+ESPMemoryMonitor::ESPMemoryMonitor()
+    : _history(MemoryMonitorAllocator<InternalMemorySnapshot>(false)),
+      _scopeHistory(MemoryMonitorAllocator<InternalScopeStats>(false)),
+      _tagUsage(MemoryMonitorAllocator<InternalTagUsage>(false)),
+      _tagBudgets(MemoryMonitorAllocator<TagBudget>(false)),
+      _taskThresholds(0, std::hash<MemoryMonitorString>{}, std::equal_to<MemoryMonitorString>{}, MemoryMonitorAllocator<std::pair<const MemoryMonitorString, TaskStackThreshold>>(false)),
+      _knownTasks(0, std::hash<TaskHandle_t>{}, std::equal_to<TaskHandle_t>{}, MemoryMonitorAllocator<std::pair<const TaskHandle_t, InternalTaskStackUsage>>(false)),
+      _leakHistory(MemoryMonitorAllocator<InternalLeakCheckResult>(false)),
+      _leakCheckpoints(MemoryMonitorAllocator<uint64_t>(false)) {}
 
 MemoryScope::MemoryScope(ESPMemoryMonitor* monitor, std::string name, MemoryTag tag, size_t startInternal, size_t startPsram, uint64_t startUs)
     : _monitor(monitor), _name(std::move(name)), _tag(tag), _startInternal(startInternal), _startPsram(startPsram), _startUs(startUs) {}
@@ -83,18 +94,13 @@ bool ESPMemoryMonitor::init(const MemoryMonitorConfig& config) {
     }
 
     _config = config;
+    _usePSRAMBuffers = _config.usePSRAMBuffers;
+    resetOwnedContainers();
 
     _mutex = xSemaphoreCreateMutex();
     if (_mutex == nullptr) {
         return false;
     }
-
-    _tagUsage.clear();
-    _tagBudgets.clear();
-    _scopeHistory.clear();
-    _knownTasks.clear();
-    _leakHistory.clear();
-    _leakCheckpoints.clear();
 
     if (_config.enableFailedAllocEvents) {
         registerFailedAllocCallback();
@@ -146,6 +152,7 @@ void ESPMemoryMonitor::deinit() {
         _scopeHistory.clear();
         _tagUsage.clear();
         _tagBudgets.clear();
+        _taskThresholds.clear();
         _knownTasks.clear();
         _leakHistory.clear();
         _leakCheckpoints.clear();
@@ -174,12 +181,13 @@ MemorySnapshot ESPMemoryMonitor::sampleNow() {
         return {};
     }
 
-    MemorySnapshot snapshot = captureSnapshot();
+    InternalMemorySnapshot snapshot = captureSnapshot();
+    MemorySnapshot publicSnapshot;
     SampleCallback sampleCb;
     ThresholdCallback thresholdCb;
     TaskStackThresholdCallback stackCb;
-    std::vector<ThresholdEvent> events;
-    std::vector<TaskStackEvent> stackEvents;
+    MemoryMonitorVector<ThresholdEvent> events{MemoryMonitorAllocator<ThresholdEvent>(_usePSRAMBuffers)};
+    MemoryMonitorVector<TaskStackEvent> stackEvents{MemoryMonitorAllocator<TaskStackEvent>(_usePSRAMBuffers)};
 
     {
         LockGuard guard(_mutex);
@@ -190,6 +198,7 @@ MemorySnapshot ESPMemoryMonitor::sampleNow() {
         sampleCb = _sampleCallback;
         thresholdCb = _thresholdCallback;
         stackCb = _taskStackCallback;
+        publicSnapshot = toPublicSnapshot(snapshot);
     }
 
     for (const auto& evt : events) {
@@ -205,15 +214,20 @@ MemorySnapshot ESPMemoryMonitor::sampleNow() {
     }
 
     if (sampleCb) {
-        sampleCb(snapshot);
+        sampleCb(publicSnapshot);
     }
 
-    return snapshot;
+    return publicSnapshot;
 }
 
 std::vector<MemorySnapshot> ESPMemoryMonitor::history() const {
     LockGuard guard(_mutex);
-    return std::vector<MemorySnapshot>(_history.begin(), _history.end());
+    std::vector<MemorySnapshot> out;
+    out.reserve(_history.size());
+    for (const auto& snap : _history) {
+        out.push_back(toPublicSnapshot(snap));
+    }
+    return out;
 }
 
 MemoryMonitorConfig ESPMemoryMonitor::currentConfig() const {
@@ -271,7 +285,10 @@ MemoryScope ESPMemoryMonitor::beginScope(const std::string& name, MemoryTag tag)
 MemoryTag ESPMemoryMonitor::registerTag(const std::string& name) {
     LockGuard guard(_mutex);
     const MemoryTag tag = static_cast<MemoryTag>(_tagUsage.size() + 1);
-    _tagUsage.push_back({tag, name, 0, 0, ThresholdState::Normal});
+    InternalTagUsage usage(_usePSRAMBuffers);
+    usage.tag = tag;
+    usage.name.assign(name.c_str(), name.size());
+    _tagUsage.push_back(std::move(usage));
     _tagBudgets.push_back({});
     return tag;
 }
@@ -288,12 +305,22 @@ bool ESPMemoryMonitor::setTagBudget(MemoryTag tag, const TagBudget& budget) {
 
 std::vector<ScopeStats> ESPMemoryMonitor::scopeHistory() const {
     LockGuard guard(_mutex);
-    return std::vector<ScopeStats>(_scopeHistory.begin(), _scopeHistory.end());
+    std::vector<ScopeStats> out;
+    out.reserve(_scopeHistory.size());
+    for (const auto& scope : _scopeHistory) {
+        out.push_back(toPublicScopeStats(scope));
+    }
+    return out;
 }
 
 std::vector<TagUsage> ESPMemoryMonitor::tagUsage() const {
     LockGuard guard(_mutex);
-    return _tagUsage;
+    std::vector<TagUsage> out;
+    out.reserve(_tagUsage.size());
+    for (const auto& usage : _tagUsage) {
+        out.push_back(toPublicTagUsage(usage));
+    }
+    return out;
 }
 
 LeakCheckResult ESPMemoryMonitor::markLeakCheckPoint(const std::string& label) {
@@ -303,13 +330,14 @@ LeakCheckResult ESPMemoryMonitor::markLeakCheckPoint(const std::string& label) {
 
     sampleNow();
 
-    LeakCheckResult result{};
+    InternalLeakCheckResult internal(_usePSRAMBuffers);
     LeakCheckCallback cb;
     {
         LockGuard guard(_mutex);
-        result = buildLeakCheckLocked(label);
+        internal = buildLeakCheckLocked(label);
         cb = _leakCallback;
     }
+    LeakCheckResult result = toPublicLeakCheckResult(internal);
 
     if (cb && !result.deltas.empty()) {
         cb(result);
@@ -320,7 +348,8 @@ LeakCheckResult ESPMemoryMonitor::markLeakCheckPoint(const std::string& label) {
 
 bool ESPMemoryMonitor::setTaskStackThreshold(const std::string& taskName, const TaskStackThreshold& threshold) {
     LockGuard guard(_mutex);
-    _taskThresholds[taskName] = threshold;
+    MemoryMonitorString internalName(taskName.c_str(), MemoryMonitorAllocator<char>(_usePSRAMBuffers));
+    _taskThresholds[std::move(internalName)] = threshold;
     return true;
 }
 
@@ -368,8 +397,8 @@ void ESPMemoryMonitor::samplerTaskLoop() {
     }
 }
 
-MemorySnapshot ESPMemoryMonitor::captureSnapshot() const {
-    MemorySnapshot snapshot{};
+ESPMemoryMonitor::InternalMemorySnapshot ESPMemoryMonitor::captureSnapshot() const {
+    InternalMemorySnapshot snapshot(_usePSRAMBuffers);
     snapshot.timestampUs = esp_timer_get_time();
 
     snapshot.regions.push_back(captureRegion(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT, MemoryRegion::Internal));
@@ -403,22 +432,23 @@ RegionStats ESPMemoryMonitor::captureRegion(uint32_t caps, MemoryRegion region) 
     return stats;
 }
 
-std::vector<TaskStackUsage> ESPMemoryMonitor::captureStacks() const {
+MemoryMonitorVector<ESPMemoryMonitor::InternalTaskStackUsage> ESPMemoryMonitor::captureStacks() const {
 #if defined(configUSE_TRACE_FACILITY) && (configUSE_TRACE_FACILITY == 1)
     const UBaseType_t taskCount = uxTaskGetNumberOfTasks();
     if (taskCount == 0) {
         return {};
     }
 
-    std::vector<TaskStatus_t> statuses(taskCount);
+    MemoryMonitorVector<TaskStatus_t> statuses{MemoryMonitorAllocator<TaskStatus_t>(_usePSRAMBuffers)};
+    statuses.resize(taskCount);
     uint32_t totalRuntime = 0;
     const UBaseType_t written = uxTaskGetSystemState(statuses.data(), statuses.size(), &totalRuntime);
     statuses.resize(written);
 
-    std::vector<TaskStackUsage> usages;
+    MemoryMonitorVector<InternalTaskStackUsage> usages{MemoryMonitorAllocator<InternalTaskStackUsage>(_usePSRAMBuffers)};
     usages.reserve(statuses.size());
     for (const auto& status : statuses) {
-        TaskStackUsage usage{};
+        InternalTaskStackUsage usage(_usePSRAMBuffers);
         usage.name = status.pcTaskName != nullptr ? status.pcTaskName : "unknown";
         usage.freeHighWaterBytes = static_cast<size_t>(status.usStackHighWaterMark) * sizeof(StackType_t);
         usage.state = status.eCurrentState;
@@ -434,8 +464,8 @@ std::vector<TaskStackUsage> ESPMemoryMonitor::captureStacks() const {
 }
 
 ScopeStats ESPMemoryMonitor::finalizeScope(const MemoryScope& scope) {
-    ScopeStats stats{};
-    stats.name = scope._name;
+    InternalScopeStats stats(_usePSRAMBuffers);
+    stats.name.assign(scope._name.c_str(), scope._name.size());
     stats.tag = scope._tag;
     stats.startInternalFreeBytes = scope._startInternal;
     stats.startPsramFreeBytes = scope._startPsram;
@@ -454,7 +484,7 @@ ScopeStats ESPMemoryMonitor::finalizeScope(const MemoryScope& scope) {
 
     ScopeCallback scopeCb;
     TagThresholdCallback tagCb;
-    std::vector<TagThresholdEvent> tagEvents;
+    MemoryMonitorVector<TagThresholdEvent> tagEvents{MemoryMonitorAllocator<TagThresholdEvent>(_usePSRAMBuffers)};
     {
         LockGuard guard(_mutex);
         appendScopeLocked(stats);
@@ -464,7 +494,7 @@ ScopeStats ESPMemoryMonitor::finalizeScope(const MemoryScope& scope) {
     }
 
     if (scopeCb) {
-        scopeCb(stats);
+        scopeCb(toPublicScopeStats(stats));
     }
 
     if (tagCb) {
@@ -473,10 +503,66 @@ ScopeStats ESPMemoryMonitor::finalizeScope(const MemoryScope& scope) {
         }
     }
 
-    return stats;
+    return toPublicScopeStats(stats);
 }
 
-void ESPMemoryMonitor::appendHistoryLocked(const MemorySnapshot& snapshot) {
+ScopeStats ESPMemoryMonitor::toPublicScopeStats(const InternalScopeStats& stats) const {
+    ScopeStats out{};
+    out.name = stats.name.c_str();
+    out.tag = stats.tag;
+    out.startInternalFreeBytes = stats.startInternalFreeBytes;
+    out.startPsramFreeBytes = stats.startPsramFreeBytes;
+    out.endInternalFreeBytes = stats.endInternalFreeBytes;
+    out.endPsramFreeBytes = stats.endPsramFreeBytes;
+    out.deltaInternalBytes = stats.deltaInternalBytes;
+    out.deltaPsramBytes = stats.deltaPsramBytes;
+    out.durationUs = stats.durationUs;
+    out.startedUs = stats.startedUs;
+    out.endedUs = stats.endedUs;
+    return out;
+}
+
+TagUsage ESPMemoryMonitor::toPublicTagUsage(const InternalTagUsage& usage) const {
+    TagUsage out{};
+    out.tag = usage.tag;
+    out.name = usage.name.c_str();
+    out.totalInternalBytes = usage.totalInternalBytes;
+    out.totalPsramBytes = usage.totalPsramBytes;
+    out.state = usage.state;
+    return out;
+}
+
+TaskStackUsage ESPMemoryMonitor::toPublicTaskStackUsage(const InternalTaskStackUsage& usage) const {
+    TaskStackUsage out{};
+    out.name = usage.name.c_str();
+    out.freeHighWaterBytes = usage.freeHighWaterBytes;
+    out.state = usage.state;
+    out.priority = usage.priority;
+    out.handle = usage.handle;
+    return out;
+}
+
+MemorySnapshot ESPMemoryMonitor::toPublicSnapshot(const InternalMemorySnapshot& snapshot) const {
+    MemorySnapshot out{};
+    out.timestampUs = snapshot.timestampUs;
+    out.regions.assign(snapshot.regions.begin(), snapshot.regions.end());
+    out.stacks.reserve(snapshot.stacks.size());
+    for (const auto& stack : snapshot.stacks) {
+        out.stacks.push_back(toPublicTaskStackUsage(stack));
+    }
+    return out;
+}
+
+LeakCheckResult ESPMemoryMonitor::toPublicLeakCheckResult(const InternalLeakCheckResult& result) const {
+    LeakCheckResult out{};
+    out.fromLabel = result.fromLabel.c_str();
+    out.toLabel = result.toLabel.c_str();
+    out.deltas.assign(result.deltas.begin(), result.deltas.end());
+    out.leakSuspected = result.leakSuspected;
+    return out;
+}
+
+void ESPMemoryMonitor::appendHistoryLocked(const InternalMemorySnapshot& snapshot) {
     if (_config.historySize == 0) {
         return;
     }
@@ -487,8 +573,8 @@ void ESPMemoryMonitor::appendHistoryLocked(const MemorySnapshot& snapshot) {
     }
 }
 
-std::vector<ThresholdEvent> ESPMemoryMonitor::evaluateThresholdsLocked(const MemorySnapshot& snapshot) {
-    std::vector<ThresholdEvent> events;
+MemoryMonitorVector<ThresholdEvent> ESPMemoryMonitor::evaluateThresholdsLocked(const InternalMemorySnapshot& snapshot) {
+    MemoryMonitorVector<ThresholdEvent> events{MemoryMonitorAllocator<ThresholdEvent>(_usePSRAMBuffers)};
     events.reserve(snapshot.regions.size());
 
     for (const auto& regionStats : snapshot.regions) {
@@ -593,7 +679,7 @@ void ESPMemoryMonitor::unregisterFailedAllocCallback() {
     }
 }
 
-void ESPMemoryMonitor::enrichSnapshotLocked(MemorySnapshot& snapshot) const {
+void ESPMemoryMonitor::enrichSnapshotLocked(InternalMemorySnapshot& snapshot) const {
     const size_t windowSize = _config.windowStatsSize;
     if (windowSize == 0) {
         return;
@@ -602,8 +688,8 @@ void ESPMemoryMonitor::enrichSnapshotLocked(MemorySnapshot& snapshot) const {
     for (auto& region : snapshot.regions) {
         const size_t idx = regionIndex(region.region);
 
-        std::vector<const RegionStats*> window;
-        std::vector<uint64_t> timestamps;
+        MemoryMonitorVector<const RegionStats*> window{MemoryMonitorAllocator<const RegionStats*>(_usePSRAMBuffers)};
+        MemoryMonitorVector<uint64_t> timestamps{MemoryMonitorAllocator<uint64_t>(_usePSRAMBuffers)};
         const size_t targetWindow = std::min(windowSize, _history.size() + 1);
         window.reserve(targetWindow);
         timestamps.reserve(targetWindow);
@@ -667,17 +753,17 @@ void ESPMemoryMonitor::enrichSnapshotLocked(MemorySnapshot& snapshot) const {
     }
 }
 
-void ESPMemoryMonitor::appendScopeLocked(const ScopeStats& stats) {
+void ESPMemoryMonitor::appendScopeLocked(const InternalScopeStats& stats) {
     if (!_config.enableScopes) {
         return;
     }
 
-    auto adjustUsage = [&](const ScopeStats& s, int direction) {
+    auto adjustUsage = [&](const InternalScopeStats& s, int direction) {
         if (s.tag == kInvalidMemoryTag || s.tag == 0 || static_cast<size_t>(s.tag) > _tagUsage.size()) {
             return;
         }
 
-        TagUsage& usage = _tagUsage[s.tag - 1];
+        InternalTagUsage& usage = _tagUsage[s.tag - 1];
         auto apply = [&](size_t& target, int64_t delta) {
             int64_t next = static_cast<int64_t>(target) + direction * delta;
             if (next < 0) {
@@ -698,14 +784,14 @@ void ESPMemoryMonitor::appendScopeLocked(const ScopeStats& stats) {
 
     _scopeHistory.push_back(stats);
     while (_scopeHistory.size() > _config.maxScopesInHistory) {
-        const ScopeStats& dropped = _scopeHistory.front();
+        const InternalScopeStats& dropped = _scopeHistory.front();
         adjustUsage(dropped, -1);
         _scopeHistory.pop_front();
     }
 }
 
-std::vector<TagThresholdEvent> ESPMemoryMonitor::evaluateTagThresholdsLocked(const ScopeStats& stats) {
-    std::vector<TagThresholdEvent> events;
+MemoryMonitorVector<TagThresholdEvent> ESPMemoryMonitor::evaluateTagThresholdsLocked(const InternalScopeStats& stats) {
+    MemoryMonitorVector<TagThresholdEvent> events{MemoryMonitorAllocator<TagThresholdEvent>(_usePSRAMBuffers)};
     if (!_config.enableScopes || _tagUsage.empty()) {
         return events;
     }
@@ -713,7 +799,7 @@ std::vector<TagThresholdEvent> ESPMemoryMonitor::evaluateTagThresholdsLocked(con
     const size_t count = _tagUsage.size();
     events.reserve(count);
     for (size_t i = 0; i < count; ++i) {
-        TagUsage& usage = _tagUsage[i];
+        InternalTagUsage& usage = _tagUsage[i];
         const TagBudget& budget = _tagBudgets[i];
         if (budget.warnBytes == 0 && budget.criticalBytes == 0) {
             continue;
@@ -724,10 +810,10 @@ std::vector<TagThresholdEvent> ESPMemoryMonitor::evaluateTagThresholdsLocked(con
         if (next != usage.state) {
             usage.state = next;
             TagThresholdEvent evt{};
-            evt.usage = usage;
+            evt.usage = toPublicTagUsage(usage);
             evt.budget = budget;
             if (usage.tag == stats.tag) {
-                evt.lastScope = stats;
+                evt.lastScope = toPublicScopeStats(stats);
             }
             events.push_back(std::move(evt));
         }
@@ -778,7 +864,7 @@ ThresholdState ESPMemoryMonitor::evaluateRisingState(ThresholdState current, con
     return ThresholdState::Normal;
 }
 
-StackState ESPMemoryMonitor::computeStackState(const TaskStackUsage& usage) const {
+StackState ESPMemoryMonitor::computeStackState(const InternalTaskStackUsage& usage) const {
     TaskStackThreshold threshold{};
     auto it = _taskThresholds.find(usage.name);
     if (it != _taskThresholds.end()) {
@@ -797,12 +883,16 @@ StackState ESPMemoryMonitor::computeStackState(const TaskStackUsage& usage) cons
     return StackState::Safe;
 }
 
-void ESPMemoryMonitor::trackTasksLocked(const MemorySnapshot& snapshot, std::vector<TaskStackEvent>& events) {
+void ESPMemoryMonitor::trackTasksLocked(const InternalMemorySnapshot& snapshot, MemoryMonitorVector<TaskStackEvent>& events) {
     if (!_config.enablePerTaskStacks || !_config.enableTaskTracking) {
         return;
     }
 
-    std::unordered_map<TaskHandle_t, TaskStackUsage> current;
+    MemoryMonitorUnorderedMap<TaskHandle_t, InternalTaskStackUsage> current(
+        0,
+        std::hash<TaskHandle_t>{},
+        std::equal_to<TaskHandle_t>{},
+        MemoryMonitorAllocator<std::pair<const TaskHandle_t, InternalTaskStackUsage>>(_usePSRAMBuffers));
     current.reserve(snapshot.stacks.size());
 
     for (const auto& usage : snapshot.stacks) {
@@ -815,26 +905,45 @@ void ESPMemoryMonitor::trackTasksLocked(const MemorySnapshot& snapshot, std::vec
 
         auto it = _knownTasks.find(usage.handle);
         if (it == _knownTasks.end()) {
-            events.push_back({usage, state, true, false});
+            events.push_back({toPublicTaskStackUsage(usage), state, true, false});
         } else {
             const StackState previousState = computeStackState(it->second);
             if (previousState != state) {
-                events.push_back({usage, state, false, false});
+                events.push_back({toPublicTaskStackUsage(usage), state, false, false});
             }
         }
     }
 
     for (const auto& [handle, prior] : _knownTasks) {
         if (current.find(handle) == current.end()) {
-            events.push_back({prior, computeStackState(prior), false, true});
+            events.push_back({toPublicTaskStackUsage(prior), computeStackState(prior), false, true});
         }
     }
 
     _knownTasks.swap(current);
 }
 
-LeakCheckResult ESPMemoryMonitor::buildLeakCheckLocked(const std::string& label) {
-    LeakCheckResult result{};
+void ESPMemoryMonitor::resetOwnedContainers() {
+    _history = MemoryMonitorDeque<InternalMemorySnapshot>(MemoryMonitorAllocator<InternalMemorySnapshot>(_usePSRAMBuffers));
+    _scopeHistory = MemoryMonitorDeque<InternalScopeStats>(MemoryMonitorAllocator<InternalScopeStats>(_usePSRAMBuffers));
+    _tagUsage = MemoryMonitorVector<InternalTagUsage>(MemoryMonitorAllocator<InternalTagUsage>(_usePSRAMBuffers));
+    _tagBudgets = MemoryMonitorVector<TagBudget>(MemoryMonitorAllocator<TagBudget>(_usePSRAMBuffers));
+    _taskThresholds = MemoryMonitorUnorderedMap<MemoryMonitorString, TaskStackThreshold>(
+        0,
+        std::hash<MemoryMonitorString>{},
+        std::equal_to<MemoryMonitorString>{},
+        MemoryMonitorAllocator<std::pair<const MemoryMonitorString, TaskStackThreshold>>(_usePSRAMBuffers));
+    _knownTasks = MemoryMonitorUnorderedMap<TaskHandle_t, InternalTaskStackUsage>(
+        0,
+        std::hash<TaskHandle_t>{},
+        std::equal_to<TaskHandle_t>{},
+        MemoryMonitorAllocator<std::pair<const TaskHandle_t, InternalTaskStackUsage>>(_usePSRAMBuffers));
+    _leakHistory = MemoryMonitorVector<InternalLeakCheckResult>(MemoryMonitorAllocator<InternalLeakCheckResult>(_usePSRAMBuffers));
+    _leakCheckpoints = MemoryMonitorVector<uint64_t>(MemoryMonitorAllocator<uint64_t>(_usePSRAMBuffers));
+}
+
+ESPMemoryMonitor::InternalLeakCheckResult ESPMemoryMonitor::buildLeakCheckLocked(const std::string& label) {
+    InternalLeakCheckResult result(_usePSRAMBuffers);
     if (_history.empty()) {
         return result;
     }
@@ -879,8 +988,8 @@ LeakCheckResult ESPMemoryMonitor::buildLeakCheckLocked(const std::string& label)
     const auto averages = computeAverages(startTs, latestTs);
 
     if (_leakHistory.empty()) {
-        result.fromLabel = label;
-        result.toLabel = label;
+        result.fromLabel.assign(label.c_str(), label.size());
+        result.toLabel.assign(label.c_str(), label.size());
         for (const auto& avg : averages) {
             LeakCheckDelta delta{};
             delta.region = avg.region;
@@ -897,8 +1006,12 @@ LeakCheckResult ESPMemoryMonitor::buildLeakCheckLocked(const std::string& label)
     }
 
     const auto& previous = _leakHistory.back();
-    result.fromLabel = previous.toLabel.empty() ? previous.fromLabel : previous.toLabel;
-    result.toLabel = label;
+    if (previous.toLabel.empty()) {
+        result.fromLabel = previous.fromLabel;
+    } else {
+        result.fromLabel = previous.toLabel;
+    }
+    result.toLabel.assign(label.c_str(), label.size());
 
     for (const auto& avg : averages) {
         LeakCheckDelta delta{};
@@ -928,7 +1041,8 @@ LeakCheckResult ESPMemoryMonitor::buildLeakCheckLocked(const std::string& label)
 }
 
 void ESPMemoryMonitor::runPanicHook() {
-    MemorySnapshot snapshot = captureSnapshot();
+    InternalMemorySnapshot internal = captureSnapshot();
+    MemorySnapshot snapshot = toPublicSnapshot(internal);
     PanicCallback cb;
     {
         LockGuard guard(_mutex);

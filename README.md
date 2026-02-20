@@ -17,6 +17,7 @@ ESPMemoryMonitor is a tiny C++17 helper that wraps ESP-IDF heap/stack inspection
 - Derived insights: windowed min/avg/max, slope-based bytes/second, and time-to-warn/critical estimates per region.
 - Task visibility: stack state transitions (`Safe/Warn/Critical`), optional new/vanished task detection, and per-task thresholds.
 - Export/panic helpers: convert snapshots to ArduinoJson for telemetry and install a shutdown/panic hook that captures a final snapshot before abort/restart.
+- Optional PSRAM-backed monitor-owned buffers via `usePSRAMBuffers` (through `ESPBufferManager`) with automatic fallback to normal heap on non-PSRAM boards, including long-lived state, hot-path transient scratch containers, and internal storage models that are converted to public API structs at boundaries.
 - Thread-safe with FreeRTOS mutexes; destructor tears down the sampler task and unregisters callbacks.
 
 ## Examples
@@ -44,6 +45,7 @@ void setup() {
     cfg.maxScopesInHistory = 16;
     cfg.windowStatsSize = 10;
     cfg.enableTaskTracking = true;
+    cfg.usePSRAMBuffers = true;            // optional: prefer PSRAM for monitor-owned containers
     monitor.init(cfg);
 
     httpTag = monitor.registerTag("http_server");
@@ -163,6 +165,7 @@ serializeJson(doc, Serial);
 | `enableTaskTracking` | `false` | Emit stack-state transitions and task create/destroy events (requires `enablePerTaskStacks`). |
 | `defaultTaskStackBytes` / `stackWarnFraction` / `stackCriticalFraction` | `4096` / `0.25` / `0.10` | Default stack headroom thresholds when per-task overrides are absent. |
 | `leakNoiseBytes` | `1024` | Ignore free-byte changes smaller than this when flagging leak drift between checkpoints. |
+| `usePSRAMBuffers` | `false` | Best-effort PSRAM preference for monitor-owned dynamic containers and internal storage models (history/scope/tag/task/leak internals plus transient threshold, scope/tag, window, and task-tracking scratch buffers); automatically falls back to normal heap when PSRAM is unavailable. |
 
 `MemorySnapshot` holds `timestampUs` plus vectors of `RegionStats` (free bytes, low-water, largest block, fragmentation, slope/time estimates, window stats) and optional `TaskStackUsage` entries (task name, priority, state, free high-water bytes).
 
@@ -171,6 +174,7 @@ serializeJson(doc, Serial);
 - `enableFailedAllocEvents` hooks IDF’s global failed-allocation callback; if you already use it elsewhere, coordinate registration to avoid conflicts.
 - Threshold hysteresis is byte-based; bump `thresholdHysteresisBytes` if your allocator churns in small bursts.
 - Fragmentation is `0` when free bytes are zero; values closer to `1.0` indicate more fragmentation.
+- `usePSRAMBuffers` affects monitor-owned container allocations only; callback captures and other external allocations are not redirected.
 
 ## Restrictions
 - ESP32 + FreeRTOS (Arduino-ESP32 or ESP-IDF) with C++17 enabled.

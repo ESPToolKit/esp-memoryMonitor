@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Added
 - More ESPMemoryMonitor examples: manual sampling without the background task and a panic-hook sketch that captures a final snapshot.
+- `MemoryMonitorConfig::usePSRAMBuffers` to prefer PSRAM for monitor-owned long-lived containers via `ESPBufferManager` with automatic fallback to normal heap.
+- Routed additional hot-path transient monitor scratch containers (threshold/task events, task-status capture, scope/tag threshold staging, and window analytics scratch vectors) through the same `ESPBufferManager` policy.
+- Added internal/public model separation for history/scope/tag/task/leak state: monitor internals now use PSRAM-policy-aware storage models and convert to existing public API structs at return/callback boundaries.
 ### Fixed
 - Mark the failed-allocation hook instance pointer as static so Arduino builds compile the callback correctly.
 

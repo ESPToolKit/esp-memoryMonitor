@@ -26,6 +26,10 @@
     {
       "name": "ArduinoJson",
       "version": "^7.0.0"
+    },
+    {
+      "name": "ESPBufferManager",
+      "version": "https://github.com/ESPToolKit/esp-buffer-manager.git"
     }
   ],
   "headers": ["ESPMemoryMonitor.h"],

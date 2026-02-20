@@ -31,6 +31,8 @@ extern "C" {
 #include <esp_heap_caps.h>
 #include <esp_timer.h>
 
+#include "memory_monitor_allocator.h"
+
 enum class MemoryRegion {
     Internal = 0,
     Psram = 1,
@@ -76,6 +78,7 @@ struct MemoryMonitorConfig {
     float stackWarnFraction = 0.25f;
     float stackCriticalFraction = 0.10f;
     size_t leakNoiseBytes = 1024;
+    bool usePSRAMBuffers = false;
 };
 
 struct WindowStats {
@@ -231,7 +234,7 @@ class MemoryScope {
 class ESPMemoryMonitor {
    public:
     friend class MemoryScope;
-    ESPMemoryMonitor() = default;
+    ESPMemoryMonitor();
     ~ESPMemoryMonitor();
 
     bool init(const MemoryMonitorConfig& config = MemoryMonitorConfig{});
@@ -296,23 +299,91 @@ class ESPMemoryMonitor {
     static void allocFailedHook(size_t requestedBytes, uint32_t caps, const char* functionName);
     static ESPMemoryMonitor* _failedAllocInstance;
 
-    MemorySnapshot captureSnapshot() const;
-    RegionStats captureRegion(uint32_t caps, MemoryRegion region) const;
-    std::vector<TaskStackUsage> captureStacks() const;
-    ScopeStats finalizeScope(const MemoryScope& scope);
+    struct InternalTaskStackUsage {
+        InternalTaskStackUsage() = default;
+        explicit InternalTaskStackUsage(bool usePSRAMBuffers) : name(MemoryMonitorAllocator<char>(usePSRAMBuffers)) {}
 
-    void appendHistoryLocked(const MemorySnapshot& snapshot);
-    std::vector<ThresholdEvent> evaluateThresholdsLocked(const MemorySnapshot& snapshot);
+        MemoryMonitorString name;
+        size_t freeHighWaterBytes = 0;
+        eTaskState state = eInvalid;
+        UBaseType_t priority = 0;
+        TaskHandle_t handle = nullptr;
+    };
+
+    struct InternalMemorySnapshot {
+        InternalMemorySnapshot() = default;
+        explicit InternalMemorySnapshot(bool usePSRAMBuffers)
+            : regions(MemoryMonitorAllocator<RegionStats>(usePSRAMBuffers)),
+              stacks(MemoryMonitorAllocator<InternalTaskStackUsage>(usePSRAMBuffers)) {}
+
+        uint64_t timestampUs = 0;
+        MemoryMonitorVector<RegionStats> regions;
+        MemoryMonitorVector<InternalTaskStackUsage> stacks;
+    };
+
+    struct InternalScopeStats {
+        InternalScopeStats() = default;
+        explicit InternalScopeStats(bool usePSRAMBuffers) : name(MemoryMonitorAllocator<char>(usePSRAMBuffers)) {}
+
+        MemoryMonitorString name;
+        MemoryTag tag = kInvalidMemoryTag;
+        size_t startInternalFreeBytes = 0;
+        size_t startPsramFreeBytes = 0;
+        size_t endInternalFreeBytes = 0;
+        size_t endPsramFreeBytes = 0;
+        int64_t deltaInternalBytes = 0;
+        int64_t deltaPsramBytes = 0;
+        uint64_t durationUs = 0;
+        uint64_t startedUs = 0;
+        uint64_t endedUs = 0;
+    };
+
+    struct InternalTagUsage {
+        InternalTagUsage() = default;
+        explicit InternalTagUsage(bool usePSRAMBuffers) : name(MemoryMonitorAllocator<char>(usePSRAMBuffers)) {}
+
+        MemoryTag tag = kInvalidMemoryTag;
+        MemoryMonitorString name;
+        size_t totalInternalBytes = 0;
+        size_t totalPsramBytes = 0;
+        ThresholdState state{ThresholdState::Normal};
+    };
+
+    struct InternalLeakCheckResult {
+        InternalLeakCheckResult() = default;
+        explicit InternalLeakCheckResult(bool usePSRAMBuffers)
+            : fromLabel(MemoryMonitorAllocator<char>(usePSRAMBuffers)),
+              toLabel(MemoryMonitorAllocator<char>(usePSRAMBuffers)),
+              deltas(MemoryMonitorAllocator<LeakCheckDelta>(usePSRAMBuffers)) {}
+
+        MemoryMonitorString fromLabel;
+        MemoryMonitorString toLabel;
+        MemoryMonitorVector<LeakCheckDelta> deltas;
+        bool leakSuspected = false;
+    };
+
+    InternalMemorySnapshot captureSnapshot() const;
+    RegionStats captureRegion(uint32_t caps, MemoryRegion region) const;
+    MemoryMonitorVector<InternalTaskStackUsage> captureStacks() const;
+    ScopeStats finalizeScope(const MemoryScope& scope);
+    ScopeStats toPublicScopeStats(const InternalScopeStats& stats) const;
+    TagUsage toPublicTagUsage(const InternalTagUsage& usage) const;
+    TaskStackUsage toPublicTaskStackUsage(const InternalTaskStackUsage& usage) const;
+    MemorySnapshot toPublicSnapshot(const InternalMemorySnapshot& snapshot) const;
+    LeakCheckResult toPublicLeakCheckResult(const InternalLeakCheckResult& result) const;
+
+    void appendHistoryLocked(const InternalMemorySnapshot& snapshot);
+    MemoryMonitorVector<ThresholdEvent> evaluateThresholdsLocked(const InternalMemorySnapshot& snapshot);
     ThresholdState evaluateState(ThresholdState current, const RegionThreshold& threshold, size_t freeBytes) const;
     void handleAllocEvent(size_t requestedBytes, uint32_t caps, const char* functionName);
 
-    void enrichSnapshotLocked(MemorySnapshot& snapshot) const;
-    void appendScopeLocked(const ScopeStats& stats);
-    std::vector<TagThresholdEvent> evaluateTagThresholdsLocked(const ScopeStats& stats);
+    void enrichSnapshotLocked(InternalMemorySnapshot& snapshot) const;
+    void appendScopeLocked(const InternalScopeStats& stats);
+    MemoryMonitorVector<TagThresholdEvent> evaluateTagThresholdsLocked(const InternalScopeStats& stats);
     ThresholdState evaluateRisingState(ThresholdState current, const TagBudget& budget, size_t usageBytes) const;
-    StackState computeStackState(const TaskStackUsage& usage) const;
-    void trackTasksLocked(const MemorySnapshot& snapshot, std::vector<TaskStackEvent>& events);
-    LeakCheckResult buildLeakCheckLocked(const std::string& label);
+    StackState computeStackState(const InternalTaskStackUsage& usage) const;
+    void trackTasksLocked(const InternalMemorySnapshot& snapshot, MemoryMonitorVector<TaskStackEvent>& events);
+    InternalLeakCheckResult buildLeakCheckLocked(const std::string& label);
     void runPanicHook();
     static void panicShutdownThunk();
 
@@ -320,13 +391,15 @@ class ESPMemoryMonitor {
     void unregisterFailedAllocCallback();
     bool registerPanicHandler();
     void unregisterPanicHandler();
+    void resetOwnedContainers();
 
     MemoryMonitorConfig _config{};
     bool _initialized = false;
     bool _running = false;
+    bool _usePSRAMBuffers = false;
     SemaphoreHandle_t _mutex = nullptr;
     TaskHandle_t _samplerTask = nullptr;
-    std::deque<MemorySnapshot> _history;
+    MemoryMonitorDeque<InternalMemorySnapshot> _history;
     std::array<ThresholdState, 2> _thresholdStates{ThresholdState::Normal, ThresholdState::Normal};
     SampleCallback _sampleCallback;
     ThresholdCallback _thresholdCallback;
@@ -336,13 +409,13 @@ class ESPMemoryMonitor {
     TaskStackThresholdCallback _taskStackCallback;
     LeakCheckCallback _leakCallback;
     PanicCallback _panicCallback;
-    std::deque<ScopeStats> _scopeHistory;
-    std::vector<TagUsage> _tagUsage;
-    std::vector<TagBudget> _tagBudgets;
-    std::unordered_map<std::string, TaskStackThreshold> _taskThresholds;
-    std::unordered_map<TaskHandle_t, TaskStackUsage> _knownTasks;
-    std::vector<LeakCheckResult> _leakHistory;
-    std::vector<uint64_t> _leakCheckpoints;
+    MemoryMonitorDeque<InternalScopeStats> _scopeHistory;
+    MemoryMonitorVector<InternalTagUsage> _tagUsage;
+    MemoryMonitorVector<TagBudget> _tagBudgets;
+    MemoryMonitorUnorderedMap<MemoryMonitorString, TaskStackThreshold> _taskThresholds;
+    MemoryMonitorUnorderedMap<TaskHandle_t, InternalTaskStackUsage> _knownTasks;
+    MemoryMonitorVector<InternalLeakCheckResult> _leakHistory;
+    MemoryMonitorVector<uint64_t> _leakCheckpoints;
     bool _panicHookInstalled = false;
 };
 
