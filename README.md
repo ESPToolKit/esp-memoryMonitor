@@ -113,6 +113,13 @@ void loop() {
 }
 ```
 
+When a service is shutting down (or before a controlled reboot), explicitly tear down monitor resources:
+```cpp
+if (monitor.isInitialized()) {
+    monitor.deinit();
+}
+```
+
 When you need richer stack info or failed-allocation events, flip `enablePerTaskStacks` and `enableFailedAllocEvents` in the config. The latest snapshot and the full ring buffer are always available via `sampleNow()`/`history()`.
 
 ### Example sketches
@@ -122,7 +129,7 @@ When you need richer stack info or failed-allocation events, flip `enablePerTask
 - `examples/panic_hook`: per-task stack thresholds, failed-allocation hook, optional JSON export, and a panic hook that dumps a final snapshot (send `p` over serial to try it).
 
 ## API Reference
-- `bool init(const MemoryMonitorConfig &cfg = {})` / `void deinit()` – start/stop the monitor. When `enableSamplerTask` is `false`, call `sampleNow()` manually.
+- `bool init(const MemoryMonitorConfig &cfg = {})` / `void deinit()` / `bool isInitialized() const` – start/stop and inspect runtime monitor state. When `enableSamplerTask` is `false`, call `sampleNow()` manually.
 - `MemorySnapshot sampleNow()` – collect a snapshot immediately; triggers callbacks and updates the ring buffer.
 - `std::vector<MemorySnapshot> history()` – copy the stored snapshots (size capped by `historySize`).
 - `MemoryMonitorConfig currentConfig() const` – inspect live settings.
@@ -182,7 +189,8 @@ serializeJson(doc, Serial);
 - No dynamic allocation inside the sampler path beyond what the STL containers already hold.
 
 ## Tests
-A dedicated host test suite is not shipped yet. Exercise the library through `examples/basic_monitor` on hardware and wire it into your CI if you extend the feature set.
+- Lifecycle teardown tests are available in `test/test_memory_monitor_lifecycle` (pre-init `deinit()`, idempotent `deinit()`, re-init, and destructor teardown behavior).
+- Host-side tests are disabled because this library depends on ESP-IDF/FreeRTOS runtime APIs; run the lifecycle suite on device with PlatformIO/Arduino.
 
 ## License
 MIT — see [LICENSE.md](LICENSE.md).

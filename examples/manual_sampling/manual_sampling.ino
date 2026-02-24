@@ -21,10 +21,7 @@ static void logSnapshot(const MemorySnapshot &snapshot) {
     }
 }
 
-void setup() {
-    Serial.begin(115200);
-
-    // Disable the background sampler; we will call sampleNow() manually.
+static MemoryMonitorConfig buildConfig() {
     MemoryMonitorConfig cfg;
     cfg.enableSamplerTask = false;
     cfg.historySize = 8;
@@ -33,7 +30,14 @@ void setup() {
     cfg.psram = {256 * 1024, 160 * 1024};
     cfg.enableScopes = true;
     cfg.maxScopesInHistory = 12;
-    monitor.init(cfg);
+    return cfg;
+}
+
+static bool initMonitor() {
+    if (!monitor.init(buildConfig())) {
+        ESP_LOGE("MEM", "monitor.init() failed");
+        return false;
+    }
 
     networkTag = monitor.registerTag("network");
     monitor.setTagBudget(networkTag, {48 * 1024, 64 * 1024});
@@ -60,9 +64,32 @@ void setup() {
     // Kick off an initial measurement so history() has data immediately.
     lastSampleMs = millis();
     monitor.sampleNow();
+    return true;
+}
+
+void setup() {
+    Serial.begin(115200);
+    initMonitor();
 }
 
 void loop() {
+    if (Serial.available()) {
+        const int c = Serial.read();
+        if ((c == 'x' || c == 'X') && monitor.isInitialized()) {
+            monitor.deinit();
+            ESP_LOGI("MEM", "monitor deinitialized (send 'i' to init again)");
+        } else if ((c == 'i' || c == 'I') && !monitor.isInitialized()) {
+            if (initMonitor()) {
+                ESP_LOGI("MEM", "monitor initialized");
+            }
+        }
+    }
+
+    if (!monitor.isInitialized()) {
+        delay(60);
+        return;
+    }
+
     // Simulate a request that consumes heap; attribute it to a tag.
     auto scope = monitor.beginScope("net_req", networkTag);
     std::vector<uint8_t> payload(6 * 1024, 0xCD);
