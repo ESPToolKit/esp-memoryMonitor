@@ -154,14 +154,8 @@ void ESPMemoryMonitor::deinit() {
 
     {
         LockGuard guard(_mutex);
-        _history.clear();
-        _scopeHistory.clear();
-        _tagUsage.clear();
-        _tagBudgets.clear();
-        _taskThresholds.clear();
-        _knownTasks.clear();
-        _leakHistory.clear();
-        _leakCheckpoints.clear();
+        // Recreate monitor-owned containers so reserved capacity is released.
+        resetOwnedContainers();
         _thresholdStates = {ThresholdState::Normal, ThresholdState::Normal};
         _sampleCallback = nullptr;
         _thresholdCallback = nullptr;
@@ -179,6 +173,9 @@ void ESPMemoryMonitor::deinit() {
     }
     _initialized = false;
     _panicHookInstalled = false;
+    _running = false;
+    _config = MemoryMonitorConfig{};
+    _usePSRAMBuffers = false;
 }
 
 MemorySnapshot ESPMemoryMonitor::sampleNow() {

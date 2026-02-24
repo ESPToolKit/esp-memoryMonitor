@@ -9,8 +9,10 @@ All notable changes to this project will be documented in this file.
 - Routed additional hot-path transient monitor scratch containers (threshold/task events, task-status capture, scope/tag threshold staging, and window analytics scratch vectors) through the same `ESPBufferManager` policy.
 - Added internal/public model separation for history/scope/tag/task/leak state: monitor internals now use PSRAM-policy-aware storage models and convert to existing public API structs at return/callback boundaries.
 - Switched sampler task lifecycle to native FreeRTOS task handling (`xTaskCreatePinnedToCore`/`vTaskDelete`).
+- Added lifecycle teardown tests in `test/test_memory_monitor_lifecycle` covering pre-init `deinit()`, idempotent teardown, re-init, and destructor behavior.
 ### Fixed
 - Mark the failed-allocation hook instance pointer as static so Arduino builds compile the callback correctly.
+- `deinit()` now releases monitor-owned container capacity (not just entries), fully clears runtime state, and resets config/runtime flags for deterministic re-init.
 
 ## [1.0.0] - 2025-12-02
 ### Added
