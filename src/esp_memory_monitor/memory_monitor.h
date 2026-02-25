@@ -79,6 +79,7 @@ struct MemoryMonitorConfig {
     float stackWarnFraction = 0.25f;
     float stackCriticalFraction = 0.10f;
     size_t leakNoiseBytes = 1024;
+    size_t maxLeakChecksInHistory = 16;
     bool usePSRAMBuffers = false;
 };
 
@@ -415,8 +416,8 @@ class ESPMemoryMonitor {
     MemoryMonitorVector<TagBudget> _tagBudgets;
     MemoryMonitorUnorderedMap<MemoryMonitorString, TaskStackThreshold> _taskThresholds;
     MemoryMonitorUnorderedMap<TaskHandle_t, InternalTaskStackUsage> _knownTasks;
-    MemoryMonitorVector<InternalLeakCheckResult> _leakHistory;
-    MemoryMonitorVector<uint64_t> _leakCheckpoints;
+    MemoryMonitorDeque<InternalLeakCheckResult> _leakHistory;
+    MemoryMonitorDeque<uint64_t> _leakCheckpoints;
     bool _panicHookInstalled = false;
 };
 
