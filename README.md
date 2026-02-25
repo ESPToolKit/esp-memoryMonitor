@@ -13,7 +13,7 @@ ESPMemoryMonitor is a tiny C++17 helper that wraps ESP-IDF heap/stack inspection
 - Per-region thresholds with hysteresis; `onThreshold` fires on enter/exit of warn/critical bands so alerts do not spam as memory bounces.
 - Optional extras: per-task stack high-water (via `uxTaskGetSystemState`), min-ever-free, and IDF failed-allocation callbacks (`heap_caps_register_failed_alloc_callback`).
 - Scope-based deltas and tag budgets: wrap a code path in `beginScope()` to measure DRAM/PSRAM consumed (or released), attribute it to a tag, and fire `onScope`/`onTagThreshold` callbacks when soft budgets are crossed.
-- Leak suspicion helpers: mark checkpoints for steady-state phases; the monitor compares averages and flags downward free-memory drift or rising fragmentation via `onLeakCheck`.
+- Leak suspicion helpers: mark checkpoints for steady-state phases; the monitor compares averages and flags downward free-memory drift or rising fragmentation via `onLeakCheck`, with bounded checkpoint/result retention.
 - Derived insights: windowed min/avg/max, slope-based bytes/second, and time-to-warn/critical estimates per region.
 - Task visibility: stack state transitions (`Safe/Warn/Critical`), optional new/vanished task detection, and per-task thresholds.
 - Export/panic helpers: convert snapshots to ArduinoJson for telemetry and install a shutdown/panic hook that captures a final snapshot before abort/restart.
@@ -172,6 +172,7 @@ serializeJson(doc, Serial);
 | `enableTaskTracking` | `false` | Emit stack-state transitions and task create/destroy events (requires `enablePerTaskStacks`). |
 | `defaultTaskStackBytes` / `stackWarnFraction` / `stackCriticalFraction` | `4096` / `0.25` / `0.10` | Default stack headroom thresholds when per-task overrides are absent. |
 | `leakNoiseBytes` | `1024` | Ignore free-byte changes smaller than this when flagging leak drift between checkpoints. |
+| `maxLeakChecksInHistory` | `16` | Ring-buffer depth for leak checkpoint timestamps/results (minimum effective value is 1). |
 | `usePSRAMBuffers` | `false` | Best-effort PSRAM preference for monitor-owned dynamic containers and internal storage models (history/scope/tag/task/leak internals plus transient threshold, scope/tag, window, and task-tracking scratch buffers); automatically falls back to normal heap when PSRAM is unavailable. |
 
 `MemorySnapshot` holds `timestampUs` plus vectors of `RegionStats` (free bytes, low-water, largest block, fragmentation, slope/time estimates, window stats) and optional `TaskStackUsage` entries (task name, priority, state, free high-water bytes).

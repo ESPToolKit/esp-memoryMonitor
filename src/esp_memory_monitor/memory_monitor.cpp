@@ -940,8 +940,8 @@ void ESPMemoryMonitor::resetOwnedContainers() {
         std::hash<TaskHandle_t>{},
         std::equal_to<TaskHandle_t>{},
         MemoryMonitorAllocator<std::pair<const TaskHandle_t, InternalTaskStackUsage>>(_usePSRAMBuffers));
-    _leakHistory = MemoryMonitorVector<InternalLeakCheckResult>(MemoryMonitorAllocator<InternalLeakCheckResult>(_usePSRAMBuffers));
-    _leakCheckpoints = MemoryMonitorVector<uint64_t>(MemoryMonitorAllocator<uint64_t>(_usePSRAMBuffers));
+    _leakHistory = MemoryMonitorDeque<InternalLeakCheckResult>(MemoryMonitorAllocator<InternalLeakCheckResult>(_usePSRAMBuffers));
+    _leakCheckpoints = MemoryMonitorDeque<uint64_t>(MemoryMonitorAllocator<uint64_t>(_usePSRAMBuffers));
 }
 
 ESPMemoryMonitor::InternalLeakCheckResult ESPMemoryMonitor::buildLeakCheckLocked(const std::string& label) {
@@ -950,9 +950,13 @@ ESPMemoryMonitor::InternalLeakCheckResult ESPMemoryMonitor::buildLeakCheckLocked
         return result;
     }
 
+    const size_t leakHistoryLimit = std::max<size_t>(1, _config.maxLeakChecksInHistory);
     const uint64_t latestTs = _history.back().timestampUs;
     const uint64_t startTs = _leakCheckpoints.empty() ? _history.front().timestampUs : _leakCheckpoints.back();
     _leakCheckpoints.push_back(latestTs);
+    while (_leakCheckpoints.size() > leakHistoryLimit) {
+        _leakCheckpoints.pop_front();
+    }
 
     auto computeAverages = [&](uint64_t from, uint64_t to) {
         struct RegionAvg {
@@ -1004,6 +1008,9 @@ ESPMemoryMonitor::InternalLeakCheckResult ESPMemoryMonitor::buildLeakCheckLocked
             result.deltas.push_back(delta);
         }
         _leakHistory.push_back(result);
+        while (_leakHistory.size() > leakHistoryLimit) {
+            _leakHistory.pop_front();
+        }
         return result;
     }
 
@@ -1039,6 +1046,9 @@ ESPMemoryMonitor::InternalLeakCheckResult ESPMemoryMonitor::buildLeakCheckLocked
     }
 
     _leakHistory.push_back(result);
+    while (_leakHistory.size() > leakHistoryLimit) {
+        _leakHistory.pop_front();
+    }
     return result;
 }
 
