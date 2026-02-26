@@ -64,29 +64,32 @@ void setup() {
 
     monitor.onScope([](const ScopeStats &s) {
         ESP_LOGI("MEM", "Scope %s used %+d DRAM, %+d PSRAM in %llu us",
-                 s.name.c_str(),
-                 static_cast<int>(s.deltaInternalBytes),
-                 static_cast<int>(s.deltaPsramBytes),
-                 static_cast<unsigned long long>(s.durationUs));
+            s.name.c_str(),
+            static_cast<int>(s.deltaInternalBytes),
+            static_cast<int>(s.deltaPsramBytes),
+            static_cast<unsigned long long>(s.durationUs)
+        );
     });
 
     monitor.onTagThreshold([](const TagThresholdEvent &evt) {
         ESP_LOGW("MEM", "Tag %s now %s at %u bytes",
-                 evt.usage.name.c_str(),
-                 evt.usage.state == ThresholdState::Critical ? "CRITICAL" :
-                 evt.usage.state == ThresholdState::Warn ? "WARN" : "OK",
-                 static_cast<unsigned>(evt.usage.totalInternalBytes + evt.usage.totalPsramBytes));
+            evt.usage.name.c_str(),
+            evt.usage.state == ThresholdState::Critical ? "CRITICAL" :
+            evt.usage.state == ThresholdState::Warn ? "WARN" : "OK",
+            static_cast<unsigned>(evt.usage.totalInternalBytes + evt.usage.totalPsramBytes)
+        );
     });
 
     monitor.onSample([](const MemorySnapshot &snapshot) {
         for (const auto &region : snapshot.regions) {
             const char *regionName = region.region == MemoryRegion::Psram ? "PSRAM" : "DRAM";
             ESP_LOGI("MEM", "%s free=%uB min=%uB frag=%.02f slope=%.01fB/s t_warn=%us", regionName,
-                     static_cast<unsigned>(region.freeBytes),
-                     static_cast<unsigned>(region.minimumFreeBytes),
-                     region.fragmentation,
-                     region.freeBytesSlope,
-                     region.secondsToWarn);
+                static_cast<unsigned>(region.freeBytes),
+                static_cast<unsigned>(region.minimumFreeBytes),
+                region.fragmentation,
+                region.freeBytesSlope,
+                region.secondsToWarn
+            );
         }
     });
 
