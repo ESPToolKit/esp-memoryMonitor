@@ -196,6 +196,13 @@ serializeJson(doc, Serial);
 - Lifecycle teardown tests are available in `test/test_memory_monitor_lifecycle` (pre-init `deinit()`, idempotent `deinit()`, re-init, and destructor teardown behavior).
 - Host-side tests are disabled because this library depends on ESP-IDF/FreeRTOS runtime APIs; run the lifecycle suite on device with PlatformIO/Arduino.
 
+## Formatting Baseline
+
+This repository follows the firmware formatting baseline from `esptoolkit-template`:
+- `.clang-format` is the source of truth for C/C++/INO layout.
+- `.editorconfig` enforces tabs (`tab_width = 4`), LF endings, and final newline.
+- Format all tracked firmware sources with `bash scripts/format_cpp.sh`.
+
 ## License
 MIT — see [LICENSE.md](LICENSE.md).
 
