@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - Mark the failed-allocation hook instance pointer as static so Arduino builds compile the callback correctly.
 - `deinit()` now releases monitor-owned container capacity (not just entries), fully clears runtime state, and resets config/runtime flags for deterministic re-init.
+- CI now pins PIOArduino Core to `v6.1.19` and installs the ESP32 platform via `pio pkg install`, restoring PlatformIO compatibility with the current `platform-espressif32` package.
 
 ## [1.0.0] - 2025-12-02
 ### Added
