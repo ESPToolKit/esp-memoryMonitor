@@ -26,6 +26,22 @@ inline size_t saturatingSubtract(size_t value, size_t delta) {
 	return value > delta ? value - delta : 0;
 }
 
+template <typename Callback, typename... Args>
+void invokeMemoryMonitorCallback(const Callback &callback, Args... args) noexcept {
+	if (!callback) {
+		return;
+	}
+
+#if defined(__cpp_exceptions)
+	try {
+		callback(args...);
+	} catch (...) {
+	}
+#else
+	callback(args...);
+#endif
+}
+
 } // namespace
 
 ESPMemoryMonitor *gPanicInstance = nullptr;
@@ -230,18 +246,18 @@ MemorySnapshot ESPMemoryMonitor::sampleNow() {
 
 	for (const auto &evt : events) {
 		if (thresholdCb) {
-			thresholdCb(evt);
+			invokeMemoryMonitorCallback(thresholdCb, evt);
 		}
 	}
 
 	for (const auto &evt : stackEvents) {
 		if (stackCb) {
-			stackCb(evt);
+			invokeMemoryMonitorCallback(stackCb, evt);
 		}
 	}
 
 	if (sampleCb) {
-		sampleCb(publicSnapshot);
+		invokeMemoryMonitorCallback(sampleCb, publicSnapshot);
 	}
 
 	return publicSnapshot;
@@ -369,7 +385,7 @@ LeakCheckResult ESPMemoryMonitor::markLeakCheckPoint(const std::string &label) {
 	LeakCheckResult result = toPublicLeakCheckResult(internal);
 
 	if (cb && !result.deltas.empty()) {
-		cb(result);
+		invokeMemoryMonitorCallback(cb, result);
 	}
 
 	return result;
@@ -547,12 +563,12 @@ ScopeStats ESPMemoryMonitor::finalizeScope(const MemoryScope &scope) {
 	}
 
 	if (scopeCb) {
-		scopeCb(toPublicScopeStats(stats));
+		invokeMemoryMonitorCallback(scopeCb, toPublicScopeStats(stats));
 	}
 
 	if (tagCb) {
 		for (const auto &evt : tagEvents) {
-			tagCb(evt);
+			invokeMemoryMonitorCallback(tagCb, evt);
 		}
 	}
 
@@ -716,7 +732,7 @@ void ESPMemoryMonitor::handleAllocEvent(
 	event.functionName = functionName;
 	event.timestampUs = esp_timer_get_time();
 
-	cb(event);
+	invokeMemoryMonitorCallback(cb, event);
 }
 
 void ESPMemoryMonitor::allocFailedHook(
@@ -1189,7 +1205,7 @@ void ESPMemoryMonitor::runPanicHook() {
 	}
 
 	if (cb) {
-		cb(snapshot);
+		invokeMemoryMonitorCallback(cb, snapshot);
 	}
 }
 

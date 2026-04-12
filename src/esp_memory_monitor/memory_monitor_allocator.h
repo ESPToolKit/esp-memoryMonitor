@@ -62,20 +62,12 @@ template <typename T> class MemoryMonitorAllocator {
 			return nullptr;
 		}
 		if (n > (std::numeric_limits<std::size_t>::max() / sizeof(T))) {
-#if defined(__cpp_exceptions)
-			throw std::bad_alloc();
-#else
-			std::abort();
-#endif
+			return nullptr;
 		}
 
 		void *memory = memory_monitor_allocator_detail::allocate(n * sizeof(T), _usePSRAMBuffers);
 		if (memory == nullptr) {
-#if defined(__cpp_exceptions)
-			throw std::bad_alloc();
-#else
-			std::abort();
-#endif
+			return nullptr;
 		}
 
 		return static_cast<T *>(memory);
